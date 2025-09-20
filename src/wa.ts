@@ -24,9 +24,13 @@ type Sess = {
   baseDir: string
   qr?: string | null
   starting?: boolean
+  lastState?: string
+  qrDataUrl?: string | null
 }
 
 const sessions = new Map<string, Sess>()
+// expõe no global opcionalmente (usado por getStatus se disponível)
+;(global as any).sessions = (global as any).sessions || sessions
 
 const ensureDir = (dir: string) => {
   try { fs.mkdirSync(dir, { recursive: true }) } catch {}
@@ -72,13 +76,23 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('connection.update', async (u) => {
+      if (u.connection) {
+        sess.lastState = u.connection
+      }
       // transforma QR em dataURL para o endpoint /sessions/:id/qr
       if (u.qr) {
-        try { sess.qr = await QRCode.toDataURL(u.qr, { margin: 0 }) }
-        catch { sess.qr = null }
+        try {
+          const dataUrl = await QRCode.toDataURL(u.qr, { margin: 0 })
+          sess.qr = dataUrl // retrocompat
+          sess.qrDataUrl = dataUrl
+        } catch {
+          sess.qr = null
+          sess.qrDataUrl = null
+        }
       }
       if (u.connection === 'open') {
         sess.qr = null
+        sess.qrDataUrl = null
       }
 
       if (u.connection === 'close') {
@@ -96,20 +110,20 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         // >>> Correção 2: em 515/401, resetar credenciais e re-parear
         if (isStreamErrored || isLoggedOut) {
           nukeDir(baseDir) // limpa a sessão corrompida
-          sessions.set(sessionId, { baseDir, starting: false, qr: null })
+          sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'restarting', qrDataUrl: null })
           setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 1500)
           return
         }
 
         // outros motivos (timeout, rede etc) → tenta reconectar preservando auth
-        sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null })
+        sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null })
         setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 1500)
       }
     })
   }
 
   boot().catch(() => {
-    sessions.set(sessionId, { baseDir, starting: false, qr: null })
+    sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'error_init', qrDataUrl: null })
   })
 }
 
@@ -129,4 +143,12 @@ export async function sendText(sessionId: string, to: string, text: string) {
     : `${to.replace(/\D/g, '')}@s.whatsapp.net`
 
   await s.sock.sendMessage(jid, { text })
+}
+
+// Novo: estado resumido da sessão
+export function getStatus(sessionId: string) {
+  // tenta global.sessoes se existir, depois fallback local
+  const globalSessions: any = (global as any).sessions
+  const s: Sess | undefined = globalSessions?.get?.(sessionId) ?? sessions.get(sessionId)
+  return { state: s?.lastState ?? 'unknown', hasQR: !!s?.qrDataUrl }
 }

@@ -10,34 +10,53 @@
   <header><h1>Escaneie o QR com o WhatsApp</h1></header>
   <div class="container">
     <div class="card" style="text-align:center">
-      <img id="img" alt="QR" style="width: 320px; max-width: 100%; border-radius: 12px; background:#fff" />
+      <img id="qrimg" alt="QR" style="width: 320px; max-width: 100%; border-radius: 12px; background:#fff" />
       <p id="hint" style="margin-top:8px; font-size:14px; opacity:.85">Abra o WhatsApp > Conectar um dispositivo</p>
-      <p id="status" style="margin-top:8px; font-size:14px; opacity:.85"></p>
+      <p id="status" style="margin-top:4px; font-size:14px; opacity:.85"></p>
+      <p id="status-note" style="margin-top:4px; font-size:13px; opacity:.75"></p>
       <a href="/" class="btn secondary" style="display:inline-block;margin-top:8px">Voltar</a>
     </div>
   </div>
   <script>
     const params = new URLSearchParams(location.search);
-    const session_id = params.get('session_id');
+    const id = params.get('session_id');
+    const img = document.querySelector('#qrimg');
     const statusEl = document.getElementById('status');
-    const img = document.getElementById('img');
-    async function poll() {
+    const note = document.getElementById('status-note');
+
+    async function pollQR() {
+      if (!id) return;
       try {
-        const r = await fetch('/sessions/' + encodeURIComponent(session_id) + '/qr');
-        if (!r.ok) {
-          statusEl.textContent = 'Aguardando QR...';
-        } else {
-          const j = await r.json();
-          img.src = j.dataUrl;
+        const r = await fetch(`/sessions/${encodeURIComponent(id)}/qr`);
+        if (r.ok) {
+          const { dataUrl } = await r.json();
+          if (dataUrl && img) img.src = dataUrl;
           statusEl.textContent = 'Leia o QR acima.';
+        } else {
+          statusEl.textContent = 'Aguardando QR...';
         }
-      } catch (e) {
+      } catch {
         statusEl.textContent = 'Erro de rede.';
-      } finally {
-        setTimeout(poll, 3000);
       }
     }
-    poll();
+
+    async function pollStatus() {
+      if (!id) return;
+      try {
+        const r = await fetch(`/sessions/${encodeURIComponent(id)}/status`);
+        if (!r.ok) return;
+        const s = await r.json();
+        if (note) note.textContent = `Status: ${s.state}`;
+        if (s.state === 'open') {
+          location.href = `/chat.html?session_id=${encodeURIComponent(id)}`;
+        }
+      } catch {}
+    }
+
+    setInterval(pollQR, 3000);
+    setInterval(pollStatus, 2000);
+    pollQR();
+    pollStatus();
   </script>
 </body>
 </html>

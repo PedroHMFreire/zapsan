@@ -1,6 +1,8 @@
-// src/routes.ts
 import { Router, Request, Response } from 'express'
-import { createOrLoadSession, getQR, sendText } from './wa'
+// Update the import to match the actual exported member names from './wa'
+import { createOrLoadSession, getQR, sendText, getStatus } from './wa'
+// If 'createOrLoadSession' exists but is exported with a different name, import it accordingly:
+// import { actualExportedName as createOrLoadSession, getQR, sendText } from './wa'
 
 const r = Router()
 
@@ -9,13 +11,14 @@ r.get('/health', (_req: Request, res: Response) => {
   res.json({ ok: true, uptime: process.uptime() })
 })
 
-// Criar/inicializar sessão (não bloqueia; responde 202 como no seu original)
+// Criar/inicializar sessão
 r.post('/sessions/create', async (req: Request, res: Response) => {
   try {
     const sessionId = String(req.body?.session_id || '').trim()
     if (!sessionId) {
       return res.status(400).json({ error: 'bad_request', message: 'session_id obrigatório' })
     }
+    // dispara criação sem bloquear resposta
     createOrLoadSession(sessionId).catch(() => {})
     return res.status(202).json({ ok: true, status: 'creating' })
   } catch (err: any) {
@@ -48,6 +51,17 @@ r.post('/messages/send', async (req: Request, res: Response) => {
   } catch (err: any) {
     const code = err?.message === 'session_not_found' ? 404 : 500
     return res.status(code).json({ error: err?.message || 'internal_error' })
+  }
+})
+
+// Status da sessão
+r.get('/sessions/:id/status', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const status = getStatus(id)
+    return res.json(status)
+  } catch (err: any) {
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
