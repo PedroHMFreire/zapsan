@@ -1,152 +1,246 @@
+// src/wa.ts
+// Baileys bootstrap completo e robusto para Render/K8s.
+//
+// REQUISITOS:
+// - Adicione a lib: npm i @whiskeysockets/baileys pino qrcode
+// - Monte um Volume no Render e mapeie para /data
+// - (Opcional) defina SESS_DIR=/data/baileys-auth
+//
+// COMO USAR (exemplo nas suas rotas):
+//   import { startSession, getSessionState, getSessionQR, sendText, destroySession } from './wa'
+//   app.post('/api/sessions/create', async (req,res)=>{ await startSession(req.body.sessionId); res.json({ok:true}) })
+//   app.get('/api/sessions/:id/qr', async (req,res)=>{ res.json(await getSessionQR(req.params.id)) })
+//   app.get('/healthz/:id', (req,res)=>{ res.json(getSessionState(req.params.id)) })
+//   app.post('/api/sessions/:id/send', async (req,res)=>{ await sendText(req.params.id, req.body.jid, req.body.text); res.json({ok:true}) })
+//   app.delete('/api/sessions/:id', async (req,res)=>{ await destroySession(req.params.id); res.json({ok:true}) })
+
 import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  DisconnectReason,
   WASocket,
+  proto,
 } from '@whiskeysockets/baileys'
+import pino from 'pino'
+import fs from 'fs'
+import path from 'path'
 import QRCode from 'qrcode'
-import { logger } from './logger'
-import { ensureDir, resolveSessionPath } from './utils'
-import { reply } from './ai'
 
-type SessionData = {
-  sock?: WASocket
-  qrDataUrl?: string | null
-  lastState?: string
-  retries?: number
+const SESS_DIR = process.env.SESS_DIR || '/data/baileys-auth'
+
+// -----------------------
+// Tipos e estados
+// -----------------------
+type Status = 'offline' | 'connecting' | 'qr' | 'online'
+
+export type SessionState = {
+  sessionId: string
+  status: Status
+  qr?: string | null       // dataURL
+  lastCode?: number | null // último código de desconexão
+  isStarting?: boolean
 }
 
-const sessions = new Map<string, SessionData>()
+type SessionRecord = {
+  sock?: WASocket
+  state: SessionState
+  baseDir: string
+}
 
-export async function createOrLoadSession(sessionId: string) {
-  // Reutiliza socket existente
-  const existing = sessions.get(sessionId)?.sock
-  if (existing) return existing
+const sessions = new Map<string, SessionRecord>()
 
-  const dir = resolveSessionPath(sessionId)
-  ensureDir(dir)
+// -----------------------
+// Helpers de arquivo
+// -----------------------
+function ensureDir(dir: string) {
+  try { fs.mkdirSync(dir, { recursive: true }) } catch {}
+}
+function nukeDir(dir: string) {
+  try { fs.rmSync(dir, { recursive: true, force: true }) } catch {}
+}
 
-  const { state, saveCreds } = await useMultiFileAuthState(dir)
+// -----------------------
+// Core: criar/iniciar sessão
+// -----------------------
+export async function startSession(sessionId = 'default'): Promise<WASocket> {
+  let rec = sessions.get(sessionId)
+  if (rec?.sock) {
+    // Já existe uma instância ativa
+    return rec.sock
+  }
+
+  const baseDir = path.join(SESS_DIR, sessionId)
+  ensureDir(baseDir)
+
+  // Evita boot concorrente
+  if (!rec) {
+    rec = {
+      baseDir,
+      state: {
+        sessionId,
+        status: 'connecting',
+        qr: null,
+        lastCode: null,
+        isStarting: true,
+      },
+    }
+    sessions.set(sessionId, rec)
+  } else {
+    rec.state.status = 'connecting'
+    rec.state.isStarting = true
+    rec.state.qr = null
+    rec.state.lastCode = null
+  }
+
+  // Carrega estado multi-arquivo
+  const { state, saveCreds } = await useMultiFileAuthState(baseDir)
+
+  // Sempre usa a versão mais recente do WhatsApp Web
   const { version } = await fetchLatestBaileysVersion()
 
-  const shouldSyncHistoryMessage = false
-
   const sock = makeWASocket({
+    version,
     auth: state,
-    version, // evita problemas de protocolo
     printQRInTerminal: false,
-    browser: ['ZapSan', 'Chrome', '1.0.0'],
-    connectTimeoutMs: 30_000,
-    defaultQueryTimeoutMs: 30_000,
-    // @ts-expect-error flag suportada em versões recentes; evita sync pesado inicial
-    shouldSyncHistoryMessage,
+    browser: ['Ubuntu', 'Chrome', '121'],
+    keepAliveIntervalMs: 30_000,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    logger: pino({ level: (process.env.BAILEYS_LOG_LEVEL as pino.Level) || 'warn' }),
   })
 
-  sessions.set(sessionId, { sock, qrDataUrl: null, lastState: 'connecting', retries: 0 })
+  rec.sock = sock
+  rec.state.status = 'connecting'
+  rec.state.isStarting = false
 
-  // Salvar credenciais SEMPRE
+  // Persistência de credenciais
   sock.ev.on('creds.update', saveCreds)
 
-  // Estado de conexão + QR
+  // QR e conexão
   sock.ev.on('connection.update', async (update) => {
-    const sref = sessions.get(sessionId)
-    if (!sref) return
+    const { connection, qr, lastDisconnect } = update
+    const code =
+      (lastDisconnect?.error as any)?.output?.statusCode ||
+      (lastDisconnect?.error as any)?.status ||
+      0
+    rec!.state.lastCode = code || null
 
-    const code = (update.lastDisconnect?.error as any)?.output?.statusCode
-    const message = (update.lastDisconnect?.error as any)?.message
-    console.debug('DEBUG connection.update:', {
-      connection: update.connection,
-      isOnline: (update as any)?.isOnline,
-      receivedPendingNotifications: (update as any)?.receivedPendingNotifications,
-      code,
-      message,
-    })
-
-    if (update.qr) {
+    // QR como DataURL para exibição no front
+    if (qr) {
       try {
-        sref.qrDataUrl = await QRCode.toDataURL(update.qr)
-        logger.info({ sessionId }, 'QR atualizado')
-        // (opcional) ASCII no terminal se qrcode-terminal estiver instalado
-        try {
-          // @ts-ignore - import dinâmico opcional
-          const qrt = await import('qrcode-terminal')
-          qrt.default?.generate
-            ? qrt.default.generate(update.qr, { small: true })
-            : qrt.generate(update.qr, { small: true })
-        } catch {}
-      } catch (err: any) {
-        logger.error({ err }, 'Falha ao gerar dataURL do QR')
+        const dataUrl = await QRCode.toDataURL(qr, { margin: 0 })
+        rec!.state.qr = dataUrl
+        rec!.state.status = 'qr'
+      } catch {
+        rec!.state.qr = null
+        rec!.state.status = 'qr'
       }
     }
 
-    if (update.connection) {
-      sref.lastState = update.connection
-      logger.info({ sessionId, connection: update.connection }, 'connection.update')
+    if (connection === 'open') {
+      rec!.state.status = 'online'
+      rec!.state.qr = null
     }
 
-    if (update.connection === 'open') {
-      sref.qrDataUrl = null // limpamos o QR quando abriu
-      sref.retries = 0
-      logger.info({ sessionId }, 'Conexão aberta (QR limpo)')
-    }
+    if (connection === 'close') {
+      // Detecta "stream errored" (515) ou auth inválida (401)
+      const isStreamError =
+        code === 515 ||
+        (lastDisconnect?.error as any)?.message?.includes('Stream Errored')
 
-    if (update.connection === 'close') {
-      logger.warn({ sessionId, code, message }, 'Conexão fechada')
-      const retriable = [408, 410, 515].includes(code)
-      if (code === 401) {
-        logger.error({ sessionId }, 'Credenciais inválidas/expiradas: apague a pasta sessions/' + sessionId + ' e refaça o pareamento.')
+      const shouldReset =
+        isStreamError ||
+        (lastDisconnect?.error as any)?.output?.statusCode === DisconnectReason.loggedOut ||
+        code === 401
+
+      if (shouldReset) {
+        // Sessão inconsistente → apaga credenciais e recomeça com pareamento limpo
+        nukeDir(baseDir)
+        rec!.state.status = 'offline'
+        rec!.state.qr = null
+        rec!.sock = undefined
+        setTimeout(() => {
+          startSession(sessionId).catch(() => {})
+        }, 1500)
         return
       }
-      if (retriable) {
-        const delay = 1500
-        const attempt = (sref.retries = (sref.retries || 0) + 1)
-        if (attempt > 8) {
-          logger.error({ sessionId, attempt }, 'Limite de tentativas (simples) atingido — parar')
-          return
-        }
-        logger.info({ sessionId, code, attempt, delay }, 'Retry programado')
-        setTimeout(() => createOrLoadSession(sessionId).catch(err => logger.error({ err, sessionId }, 'Falha ao reconectar')), delay)
-      }
+
+      // Outros motivos (timeout, network, 408/410, etc) → tenta reconectar preservando auth
+      rec!.state.status = 'offline'
+      rec!.sock = undefined
+      setTimeout(() => {
+        startSession(sessionId).catch(() => {})
+      }, 1500)
     }
   })
 
-  // Mensagens recebidas -> IA
-  sock.ev.on('messages.upsert', async (evt) => {
-    const msg = evt.messages?.[0]
-    if (!msg || msg.key.fromMe) return
-
-    const from = msg.key.remoteJid || ''
-    const text =
-      msg.message?.conversation ||
-      msg.message?.extendedTextMessage?.text ||
-      msg.message?.imageMessage?.caption ||
-      msg.message?.videoMessage?.caption ||
-      ''
-
-    if (!text.trim()) return
-
+  // Exemplo de recebimento (plugue sua lógica/IA aqui)
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (!messages?.length) return
+    const m = messages[0]
+    // Exemplo: auto-ack
     try {
-      const answer = await reply({ text, from, sessionId })
-      await sock.sendMessage(from, { text: answer })
-      logger.info({ sessionId, from }, 'IA respondeu')
-    } catch (err: any) {
-      logger.error({ err, sessionId }, 'Falha ao responder via IA')
-    }
+      if (m.key?.remoteJid && m.key.id) {
+        await sock.readMessages([m.key])
+      }
+    } catch {}
+    // TODO: chamar seu orquestrador de IA/chatbot aqui
   })
 
   return sock
 }
 
-export function getQR(sessionId: string): string | null {
-  const s = sessions.get(sessionId)
-  return s?.qrDataUrl || null
+// -----------------------
+// Utilitários expostos
+// -----------------------
+export function getSessionState(sessionId = 'default'): SessionState {
+  const rec = sessions.get(sessionId)
+  return (
+    rec?.state || {
+      sessionId,
+      status: 'offline',
+      qr: null,
+      lastCode: null,
+      isStarting: false,
+    }
+  )
 }
 
-export async function sendText(sessionId: string, to: string, text: string) {
-  const s = sessions.get(sessionId)
-  if (!s?.sock) throw new Error('session_not_found')
-  await s.sock.sendMessage(to, { text })
+export async function getSessionQR(sessionId = 'default'): Promise<{ status: Status; qr: string | null }> {
+  const s = getSessionState(sessionId)
+  // Garante boot assíncrono, caso não esteja iniciado
+  if (s.status === 'offline' && !s.isStarting) {
+    await startSession(sessionId).catch(() => {})
+  }
+  return { status: getSessionState(sessionId).status, qr: getSessionState(sessionId).qr || null }
 }
 
-// Handlers globais (captura erros silenciosos)
-process.on('unhandledRejection', (e) => console.error('UNHANDLED REJECTION', e))
-process.on('uncaughtException', (e) => console.error('UNCAUGHT EXCEPTION', e))
+function getSock(sessionId = 'default'): WASocket | undefined {
+  return sessions.get(sessionId)?.sock
+}
+
+export async function sendText(sessionId: string, jid: string, text: string) {
+  const sock = getSock(sessionId) || (await startSession(sessionId))
+  // Normaliza JID (se vier só número)
+  const normalized = jid.includes('@s.whatsapp.net') || jid.includes('@g.us')
+    ? jid
+    : `${jid.replace(/\D/g, '')}@s.whatsapp.net`
+
+  await sock.sendMessage(normalized, { text })
+}
+
+export async function destroySession(sessionId = 'default') {
+  const rec = sessions.get(sessionId)
+  try {
+    // encerra socket
+    await rec?.sock?.logout?.().catch(() => {})
+    // apaga credenciais
+    nukeDir(rec?.baseDir || path.join(SESS_DIR, sessionId))
+  } finally {
+    sessions.delete(sessionId)
+  }
+}
+
+export function isOnline(sessionId = 'default'): boolean {
+  return getSessionState(sessionId).status === 'online'
+}

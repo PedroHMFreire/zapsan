@@ -1,49 +1,101 @@
-import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
-import path from 'path'
 import { setDefaultResultOrder } from 'dns'
-import { logger } from './logger'
-import routes from './routes'
+import morgan from 'morgan'
 
-// Força resolução IPv4 primeiro – mitiga quedas (ex.: stream errored 515) ligadas a IPv6/DNS em alguns ISPs macOS
-setDefaultResultOrder('ipv4first')
+// Importa o bootstrap do WhatsApp (arquivo que te enviei)
+import {
+  startSession,
+  getSessionState,
+  getSessionQR,
+  sendText,
+  destroySession,
+} from './wa'
 
-// __dirname já existe em CommonJS; remoção de import.meta para evitar erro de compilação
+// Algumas redes quebram IPv6; priorizamos IPv4 para estabilidade do Baileys
+try {
+  setDefaultResultOrder('ipv4first')
+} catch { /* Node <18 ignora */ }
 
 const app = express()
-
-// Middlewares básicos
 app.use(cors())
 app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+app.use(morgan('dev'))
 
-// Frontend estático (sem bundler)
-const pub = path.join(process.cwd(), 'public')
-app.use(express.static(pub))
+// ---- Rotas WhatsApp ----
 
-// Rotas da API
-app.use('/', routes)
-
-// Health extra rápido (opcional; já existe em routes)
-app.get('/healthz', (_req, res) => res.json({ ok: true, uptime: process.uptime() }))
-
-// 404 para API
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/sessions') || req.path.startsWith('/messages')) {
-    return res.status(404).json({ error: 'not_found' })
+// Criar/Iniciar sessão (gera QR se não houver login salvo)
+app.post('/api/sessions/create', async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || 'default')
+    await startSession(sessionId)
+    res.json({ ok: true, sessionId })
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || 'fail' })
   }
-  next()
 })
 
-// Erros padrão em JSON
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  logger.error({ err }, 'Unhandled error')
-  res.status(500).json({ error: 'internal_error' })
+// Obter QR e status atual
+app.get('/api/sessions/:id/qr', async (req, res) => {
+  try {
+    const { id } = req.params
+    const data = await getSessionQR(id)
+    res.json(data) // { status: 'qr'|'online'|..., qr: dataURL|null }
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || 'fail' })
+  }
 })
 
-const PORT = Number(process.env.PORT || 3000)
+// Health da sessão (útil para o Render Health Check)
+app.get('/healthz/:id', (req, res) => {
+  const s = getSessionState(req.params.id)
+  res.json(s) // { sessionId, status, qr, lastCode }
+})
+
+// Enviar mensagem de texto
+app.post('/api/sessions/:id/send', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { jid, text } = req.body || {}
+    if (!jid || !text) return res.status(400).json({ ok: false, error: 'jid e text são obrigatórios' })
+    await sendText(id, jid, text)
+    res.json({ ok: true })
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || 'fail' })
+  }
+})
+
+// Destruir sessão (logout + apagar credenciais)
+app.delete('/api/sessions/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    await destroySession(id)
+    res.json({ ok: true })
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || 'fail' })
+  }
+})
+
+// Raiz simples
+app.get('/', (_req, res) => {
+  res.json({
+    ok: true,
+    name: 'ZapModa API',
+    endpoints: {
+      create: 'POST /api/sessions/create { sessionId }',
+      qr: 'GET /api/sessions/:id/qr',
+      health: 'GET /healthz/:id',
+      send: 'POST /api/sessions/:id/send { jid, text }',
+      destroy: 'DELETE /api/sessions/:id',
+    },
+  })
+})
+
+// Sobe o servidor (Render usa PORT)
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000
 app.listen(PORT, () => {
-  logger.info(`ZapSan online em http://localhost:${PORT}`)
+  // eslint-disable-next-line no-console
+  console.log(`API online na porta :${PORT}`)
 })
+
+export default app
