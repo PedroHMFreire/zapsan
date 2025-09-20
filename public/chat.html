@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZapSan • Chat</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header><h1>Chat do Bot</h1></header>
+  <div class="container">
+    <div class="card chat">
+      <div class="messages" id="messages"></div>
+      <div>
+        <label>Seu número (com DDI/DDD, ex.: 5598999999999)</label>
+        <input id="to" placeholder="5598XXXXXXXXX" />
+        <div class="row" style="margin-top:6px">
+          <input id="text" placeholder="Escreva uma mensagem..." />
+          <button class="btn" id="send">Enviar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const session_id = params.get('session_id');
+    const list = document.getElementById('messages');
+    const to = document.getElementById('to');
+    const text = document.getElementById('text');
+    const sendBtn = document.getElementById('send');
+
+    function pushMsg(who, content) {
+      const el = document.createElement('div');
+      el.className = 'msg ' + (who === 'me' ? 'me' : 'bot');
+      el.textContent = content;
+      list.appendChild(el);
+      list.scrollTop = list.scrollHeight;
+    }
+
+    sendBtn.onclick = async () => {
+      const payload = { session_id, to: to.value.trim(), text: text.value.trim() };
+      if (!payload.session_id || !payload.to || !payload.text) return alert('Preencha todos os campos');
+      pushMsg('me', payload.text);
+      text.value = '';
+      const r = await fetch('/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(()=>({}));
+        pushMsg('bot', 'Erro: ' + (j.error || r.status));
+      } else {
+        // Como não temos WebSocket, simulamos eco de entrega
+        pushMsg('bot', 'Enviado! A resposta chegará no seu WhatsApp.');
+      }
+    };
+  </script>
+</body>
+</html>

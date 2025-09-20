@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZapSan • Início</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header><h1>ZapSan</h1></header>
+  <div class="container">
+    <div class="card">
+      <label>Session ID</label>
+      <input id="session" placeholder="ex.: loja-sante-a1" />
+      <div class="row" style="margin-top:8px">
+        <button class="btn" id="btnCreate">Criar sessão</button>
+        <button class="btn secondary" id="btnQR">Ver QR</button>
+        <button class="btn secondary" id="btnChat">Entrar no Chat</button>
+      </div>
+      <p id="status" style="margin-top:8px; font-size:14px; opacity:.85"></p>
+    </div>
+    <footer>Servidor único com Baileys + REST + Páginas. Edite <code>config/bot.yaml</code> para personalizar o atendente.</footer>
+  </div>
+  <script>
+    const sessionInput = document.getElementById('session');
+    const statusEl = document.getElementById('status');
+    document.getElementById('btnCreate').onclick = async () => {
+      const session_id = sessionInput.value.trim();
+      if (!session_id) return alert('Informe um session_id');
+      const r = await fetch('/sessions/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id })
+      });
+      const j = await r.json();
+      statusEl.textContent = r.ok ? 'Sessão criada/ativando...' : (j.error || 'Falha');
+    };
+    document.getElementById('btnQR').onclick = () => {
+      const session_id = sessionInput.value.trim();
+      if (!session_id) return alert('Informe um session_id');
+      window.location.href = '/qr.html?session_id=' + encodeURIComponent(session_id);
+    };
+    document.getElementById('btnChat').onclick = () => {
+      const session_id = sessionInput.value.trim();
+      if (!session_id) return alert('Informe um session_id');
+      window.location.href = '/chat.html?session_id=' + encodeURIComponent(session_id);
+    };
+  </script>
+</body>
+</html>

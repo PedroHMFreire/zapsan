@@ -1,0 +1,32 @@
+{
+  "name": "zapsan",
+  "version": "1.0.0",
+  "description": "ZapSan — servidor único (Express) com Baileys, rotas REST, página web de chat e IA.",
+  "main": "dist/server.js",
+  "license": "MIT",
+  "scripts": {
+    "dev": "NODE_OPTIONS='--dns-result-order=ipv4first' tsx src/server.ts",
+    "build": "tsc",
+    "start": "NODE_OPTIONS='--dns-result-order=ipv4first' node dist/server.js",
+    "net:check": "NODE_OPTIONS='--dns-result-order=ipv4first' node scripts/net-check.mjs"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pino": "^9.4.0",
+    "qrcode": "^1.5.4",
+    "yaml": "^2.5.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.12",
+    "@types/qrcode": "^1.5.5",
+    "@types/qrcode-terminal": "^0.12.2",
+    "qrcode-terminal": "^0.12.0",
+    "tsx": "^4.15.7",
+    "typescript": "^5.5.4"
+  }
+}
