@@ -111,7 +111,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         if (isStreamErrored || isLoggedOut) {
           nukeDir(baseDir) // limpa a sessão corrompida
           sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'restarting', qrDataUrl: null })
-          setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 1500)
+          setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 20000)
           return
         }
 
