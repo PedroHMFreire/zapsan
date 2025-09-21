@@ -358,5 +358,66 @@
       <div class="modal-f"><button class="m-btn" data-close>Fechar</button><button class="btn" id="tag-save">Aplicar etiqueta</button></div>
     </div>
   </div>
+
+  <!-- Late binding script to ensure modal elements exist -->
+  <script>
+  (function(){
+    // Re-bind close buttons with event delegation (in case initial binding missed due to DOM order)
+    document.addEventListener('click', (e)=>{
+      const t = e.target;
+      if(t && t.matches && t.matches('.modal [data-close]')){
+        const modal = t.closest('.modal');
+        if(modal) modal.classList.remove('show');
+      }
+    });
+
+    // Safe query helper (JS only)
+  function $(s, r){ return (r||document).querySelector(s); }
+
+    // If earlier listeners failed (elements absent), attach now.
+    $('#qr-open')?.getAttribute('data-bound') || $('#qr-open')?.addEventListener('click', async ()=>{
+      const el = $('#qr-session');
+      const id = el && el.value ? el.value.trim() : '';
+      if(!id) return toast('Informe session_id','err');
+      try {
+        await fetch('/sessions/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:id})});
+        localStorage.setItem('session_id', id);
+        window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank');
+      } catch { toast('Erro ao criar sessão','err'); }
+    });
+
+    $('#flow-save')?.getAttribute('data-bound') || $('#flow-save')?.addEventListener('click', async ()=>{
+      const nameEl = $('#flow-name');
+      const jsonEl = $('#flow-json');
+      const name = (nameEl && nameEl.value ? nameEl.value.trim() : '') || 'Fluxo';
+      let nodes=[]; try{ nodes = JSON.parse(jsonEl && jsonEl.value ? jsonEl.value : '[]') }catch{return toast('JSON inválido','err')}
+      try{ const r=await fetch('/flows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,nodes})}); if(!r.ok) return toast('Erro ao salvar fluxo','err'); toast('Fluxo salvo'); $('#mdl-flow')?.classList.remove('show'); }catch{toast('Erro rede','err')}
+    });
+
+    $('#sched-save')?.getAttribute('data-bound') || $('#sched-save')?.addEventListener('click', async ()=>{
+      const sEl=$('#sched-session'); const toEl=$('#sched-to'); const txtEl=$('#sched-text'); const whenEl=$('#sched-when');
+      const session_id = (sEl && sEl.value ? sEl.value.trim() : '') || localStorage.getItem('session_id') || '';
+      const to = toEl && toEl.value ? toEl.value.trim() : '';
+      const text = txtEl && txtEl.value ? txtEl.value.trim() : '';
+      const when = whenEl && whenEl.value ? whenEl.value : '';
+      if(!session_id||!to||!text||!when) return toast('Preencha todos os campos','err');
+      try{ const r=await fetch('/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id,to,text,when})}); if(!r.ok) return toast('Erro ao agendar','err'); toast('Agendado'); }catch{ toast('Erro rede','err') }
+    });
+
+    $('#tag-save')?.getAttribute('data-bound') || $('#tag-save')?.addEventListener('click', async ()=>{
+      const idEl=$('#tag-msg-id'); const labelEl=$('#tag-label');
+      const id = idEl && idEl.value ? idEl.value.trim() : '';
+      const label = labelEl && labelEl.value ? labelEl.value.trim() : '';
+      if(!id||!label) return toast('Informe id e etiqueta','err');
+      try{ const r=await fetch('/tags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,label})}); if(!r.ok) return toast('Erro ao etiquetar','err'); toast('Etiqueta aplicada'); }catch{ toast('Erro rede','err') }
+    });
+
+    // Menu open bindings safeguard (in case earlier script ran too early somehow)
+    $('#menu-flow')?.addEventListener('click', ()=>$('#mdl-flow')?.classList.add('show'))
+    $('#menu-qr')?.addEventListener('click', ()=>$('#mdl-qr')?.classList.add('show'))
+    $('#menu-schedule')?.addEventListener('click', ()=>$('#mdl-schedule')?.classList.add('show'))
+    $('#menu-tags')?.addEventListener('click', ()=>$('#mdl-tags')?.classList.add('show'))
+  })();
+  </script>
 </body>
 </html>
