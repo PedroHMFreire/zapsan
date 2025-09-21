@@ -10,6 +10,12 @@
 <body>
   <header class="topbar"><div class="topbar-inner">
     <div class="brand">Santê Console</div>
+    <nav class="menu">
+      <button class="m-btn" id="menu-flow">Fluxo do chatbot</button>
+      <button class="m-btn" id="menu-qr">Conectar QR</button>
+      <button class="m-btn" id="menu-schedule">Agendar envios</button>
+      <button class="m-btn" id="menu-tags">Etiquetar mensagem</button>
+    </nav>
     <div class="badge" id="svc-badge">Carregando…</div>
   </div></header>
 
@@ -79,6 +85,7 @@
   const svcBadge=document.getElementById('svc-badge');
   const textInput=document.getElementById('text');
   const composer=document.getElementById('composer');
+  let msgSeq=0; // contador sintético para IDs de mensagens
 
   function renderChatList(){
     listEl.innerHTML='';
@@ -110,9 +117,28 @@
   }
 
   function pushMsg(dir,text){
+    const id = Date.now().toString(36)+'-'+(msgSeq++).toString(36);
     const el=document.createElement('div');
     el.className='msg '+(dir==='out'?'out':'in');
+    el.setAttribute('data-id', id);
     el.textContent=text;
+    // etiqueta existente (se houver)
+    try {
+      const tags = JSON.parse(localStorage.getItem('tags')||'{}');
+      if(tags[id]){
+        const tagEl=document.createElement('div');
+        tagEl.className='meta';
+        tagEl.textContent='#'+tags[id];
+        el.appendChild(tagEl);
+      }
+    } catch {}
+    // menu de contexto para etiquetar
+    el.addEventListener('contextmenu', (e)=>{
+      e.preventDefault();
+      const tagInput = document.getElementById('tag-msg-id');
+      if(tagInput) tagInput.value = id;
+      show('#mdl-tags');
+    });
     messagesEl.appendChild(el);
     scrollBottom();
   }
@@ -166,6 +192,129 @@
   document.getElementById('new-chat').onclick=()=>toast('Funcionalidade futura');
 
   renderChatList();
+  // ==== Modal utilities & feature mocks ====
+  function $(s,root=document){return root.querySelector(s)}
+  function show(id){ $(id).classList.add('show') }
+  function hide(el){ el.classList.remove('show') }
+  document.querySelectorAll('.modal [data-close]')?.forEach(b=>b.addEventListener('click',e=>hide(e.target.closest('.modal'))))
+
+  // Open modals
+  $('#menu-flow')?.addEventListener('click', ()=>show('#mdl-flow'))
+  $('#menu-qr')?.addEventListener('click', ()=>show('#mdl-qr'))
+  $('#menu-schedule')?.addEventListener('click', ()=>show('#mdl-schedule'))
+  $('#menu-tags')?.addEventListener('click', ()=>show('#mdl-tags'))
+
+  // Conectar QR
+  $('#qr-open')?.addEventListener('click', async ()=>{
+    const id = $('#qr-session')?.value?.trim()
+    if(!id) return toast('Informe session_id','err')
+    await fetch('/sessions/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:id})})
+    localStorage.setItem('session_id', id)
+    window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank')
+  })
+
+  // Fluxo do chatbot (mock)
+  function loadFlows(){ try{return JSON.parse(localStorage.getItem('flows')||'[]')}catch{return []}}
+  function saveFlows(f){ localStorage.setItem('flows', JSON.stringify(f)) }
+  $('#flow-save')?.addEventListener('click', ()=>{
+    const name = $('#flow-name')?.value?.trim()||'Fluxo'
+    let json; try{ json = JSON.parse($('#flow-json')?.value || '[]') }catch(e){ return toast('JSON inválido','err') }
+    const flows = loadFlows(); flows.push({ id: Date.now().toString(36), name, nodes: json }); saveFlows(flows);
+    toast('Fluxo salvo'); hide($('#mdl-flow'))
+  })
+
+  // Agendar envios (mock)
+  function loadSchedules(){ try{return JSON.parse(localStorage.getItem('schedules')||'[]')}catch{return []}}
+  function saveSchedules(x){ localStorage.setItem('schedules', JSON.stringify(x)) }
+  function renderSchedules(){ const box = $('#sched-list'); if(!box) return; const arr = loadSchedules(); box.innerHTML = arr.length? arr.map(s=>`• ${new Date(s.when).toLocaleString()} → ${s.to}: "${s.text}"`).join('<br>') : 'Sem agendamentos.' }
+  renderSchedules()
+  $('#sched-save')?.addEventListener('click', ()=>{
+    const session_id = $('#sched-session')?.value?.trim() || localStorage.getItem('session_id') || ''
+    const to = $('#sched-to')?.value?.trim()
+    const text = $('#sched-text')?.value?.trim()
+    const when = $('#sched-when')?.value
+    if(!session_id||!to||!text||!when) return toast('Preencha todos os campos','err')
+    const item = { id:Date.now(), session_id, to, text, when: new Date(when).toISOString() }
+    const arr = loadSchedules(); arr.push(item); saveSchedules(arr); renderSchedules(); toast('Agendado')
+    const delay = new Date(item.when).getTime() - Date.now()
+    if(delay > 0){ setTimeout(async ()=>{ try{ await fetch('/messages/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:item.session_id,to:item.to,text:item.text})}); toast('Mensagem enviada') }catch{ toast('Falha ao enviar','err') } }, delay) }
+  })
+
+  // Etiquetas (mock)
+  function loadTags(){ try{return JSON.parse(localStorage.getItem('tags')||'{}')}catch{return {}}}
+  function saveTags(t){ localStorage.setItem('tags', JSON.stringify(t)) }
+  function renderTags(){ const box = $('#tag-list'); if(!box) return; const t = loadTags(); box.innerHTML = Object.keys(t).length? Object.entries(t).map(([k,v])=>`• ${k}: ${v}`).join('<br>') : 'Sem etiquetas.' }
+  renderTags()
+  $('#tag-save')?.addEventListener('click', ()=>{
+    const id = $('#tag-msg-id')?.value?.trim()
+    const label = $('#tag-label')?.value?.trim()
+    if(!id||!label) return toast('Informe id e etiqueta','err')
+    const t = loadTags(); t[id]=label; saveTags(t); renderTags(); toast('Etiqueta aplicada')
+  })
+
+  // toast util fallback
+  if(typeof toast!=='function'){
+    window.toast = function(msg,type='ok'){
+      const t=document.createElement('div');t.className='toast '+type; t.textContent=msg; document.body.appendChild(t);
+      requestAnimationFrame(()=>t.classList.add('show')); setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500)
+    }
+  }
   </script>
+
+  <!-- Fluxo do chatbot -->
+  <div class="modal" id="mdl-flow">
+    <div class="modal-card">
+      <div class="modal-h"><strong>Fluxo do chatbot</strong><button class="m-btn" data-close>✕</button></div>
+      <div class="modal-b">
+        <p class="help">Monte um fluxo simples de nós e respostas (mock). Depois plugamos no config/bot.yaml.</p>
+        <div class="row"><span class="label">Nome do fluxo</span><input class="input" id="flow-name" placeholder="Ex. Recepção Santê"></div>
+        <div class="row"><span class="label">Nós</span><textarea class="input" id="flow-json" rows="8" placeholder='[{"id":"start","text":"Olá!","next":"menu"}]'></textarea></div>
+        <div class="help">Formato JSON minimal: id, text, next (ou options:[{label,next}]).</div>
+      </div>
+      <div class="modal-f"><button class="m-btn" data-close>Cancelar</button><button class="btn" id="flow-save">Salvar fluxo</button></div>
+    </div>
+  </div>
+
+  <!-- Conectar QR -->
+  <div class="modal" id="mdl-qr">
+    <div class="modal-card">
+      <div class="modal-h"><strong>Conectar QR</strong><button class="m-btn" data-close>✕</button></div>
+      <div class="modal-b">
+        <div class="row"><span class="label">Session ID</span><input class="input" id="qr-session" placeholder="Ex. santemoda-01"></div>
+        <p class="help">Cria a sessão e abre o QR em nova aba.</p>
+      </div>
+      <div class="modal-f"><button class="m-btn" data-close>Fechar</button><button class="btn" id="qr-open">Abrir QR</button></div>
+    </div>
+  </div>
+
+  <!-- Agendar envios -->
+  <div class="modal" id="mdl-schedule">
+    <div class="modal-card">
+      <div class="modal-h"><strong>Agendar envios</strong><button class="m-btn" data-close>✕</button></div>
+      <div class="modal-b">
+        <div class="row"><span class="label">Session ID</span><input class="input" id="sched-session" placeholder="Ex. santemoda-01"></div>
+        <div class="row"><span class="label">Para (JID)</span><input class="input" id="sched-to" placeholder="5511999999999@s.whatsapp.net"></div>
+        <div class="row"><span class="label">Mensagem</span><input class="input" id="sched-text" placeholder="Texto da campanha"></div>
+        <div class="row"><span class="label">Quando</span><input class="input" id="sched-when" type="datetime-local"></div>
+        <div class="help">Mock local: salva no localStorage e executa no horário via setTimeout (enquanto a página estiver aberta).</div>
+        <div id="sched-list" class="help"></div>
+      </div>
+      <div class="modal-f"><button class="m-btn" data-close>Fechar</button><button class="btn" id="sched-save">Agendar</button></div>
+    </div>
+  </div>
+
+  <!-- Etiquetar mensagem -->
+  <div class="modal" id="mdl-tags">
+    <div class="modal-card">
+      <div class="modal-h"><strong>Etiquetar mensagem</strong><button class="m-btn" data-close>✕</button></div>
+      <div class="modal-b">
+        <div class="row"><span class="label">ID da msg</span><input class="input" id="tag-msg-id" placeholder="ex. key.id"></div>
+        <div class="row"><span class="label">Etiqueta</span><input class="input" id="tag-label" placeholder="Prioridade, VIP, Suporte..."></div>
+        <div class="help">Mock: vamos manter um map de etiquetas em localStorage (msgId -> tag).</div>
+        <div id="tag-list" class="help"></div>
+      </div>
+      <div class="modal-f"><button class="m-btn" data-close>Fechar</button><button class="btn" id="tag-save">Aplicar etiqueta</button></div>
+    </div>
+  </div>
 </body>
 </html>

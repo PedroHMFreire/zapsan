@@ -140,4 +140,20 @@ a{color:var(--wa-accent);text-decoration:none} a:hover{opacity:.9}
 @media (min-width:1024px){
   .container{max-width:1200px}
 }
+/* Menu & Modal */
+.menu{display:flex;gap:8px}
+.menu .m-btn{background:transparent;border:1px solid var(--wa-border);color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer}
+.modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);z-index:100}
+.modal.show{display:flex}
+.modal-card{background:var(--wa-panel);border:1px solid var(--wa-border);border-radius:14px;box-shadow:var(--shadow);width:min(680px,92vw);max-height:86vh;display:flex;flex-direction:column}
+.modal-h{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--wa-border)}
+.modal-b{padding:14px;overflow:auto}
+.modal-f{display:flex;gap:8px;justify-content:flex-end;padding:12px 14px;border-top:1px solid var(--wa-border)}
+.row{display:flex;gap:10px;align-items:center;margin:8px 0}
+.label{width:140px;color:var(--muted);font-size:.92rem}
+.help{color:var(--muted);font-size:.85rem}
+.menu .m-btn:hover{opacity:.9}
+.modal-b .row{margin:12px 0}
+textarea.input{font-family:inherit;font-size:14px;line-height:1.4;}
+.input[type="datetime-local"]{font-family:inherit;font-size:14px;color:var(--text);background:#0e171d;}
 /* (3) Layout WhatsApp: aguardando especificação para .app structure */
