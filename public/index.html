@@ -53,11 +53,11 @@
         </div>
       </div>
       <div class="c-messages" id="messages"></div>
-      <form class="c-composer" id="composer">
+    <form class="c-composer" id="composer">
   <button type="button" class="icon-btn" id="attach" aria-label="Anexar arquivo">📎</button>
-  <input class="input" id="text" placeholder="Escreva uma mensagem…" autocomplete="off" aria-label="Mensagem" />
+  <textarea class="input" id="text" placeholder="Escreva uma mensagem…" aria-label="Mensagem" rows="1" style="resize:none;overflow:hidden"></textarea>
   <button type="submit" class="btn" id="send" aria-label="Enviar mensagem">Enviar</button>
-      </form>
+    </form>
     </section>
   </div>
 
@@ -212,10 +212,31 @@
     pushMsg('out',text);
     const payload={ session_id: localStorage.getItem('session_id') || '', to: currentChat.id, text };
     textInput.value='';
+    autoResize(textInput);
     try{
       const r=await fetch('/messages/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       if(!r.ok){ toast('Falha ao enviar','err'); }
     }catch{ toast('Falha ao enviar','err'); }
+  });
+
+  // Auto-resize textarea up to a max height (approx 6 lines)
+  function autoResize(el){
+    if(!el) return; el.style.height='auto';
+    const max=140; // px
+    const h=Math.min(el.scrollHeight, max);
+    el.style.height=h+'px';
+    el.style.overflowY = el.scrollHeight>max ? 'auto':'hidden';
+  }
+  textInput.addEventListener('input',()=>autoResize(textInput));
+  autoResize(textInput);
+
+  // Enter to send (desktop style): Enter sends, Shift+Enter newline
+  textInput.addEventListener('keydown',(e)=>{
+    if(e.key==='Enter' && !e.shiftKey){
+      e.preventDefault();
+      // Trigger submit programmatically
+      composer.requestSubmit();
+    }
   });
 
   // New chat just demonstrates toast

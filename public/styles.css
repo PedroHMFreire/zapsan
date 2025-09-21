@@ -65,6 +65,7 @@ a{color:var(--wa-accent);text-decoration:none} a:hover{opacity:.9}
 .msg.out{background:var(--bubble-out);margin-left:auto}
 .msg .meta{display:block;margin-top:4px;color:#aeb6bb;font-size:.78rem;opacity:.8;text-align:right}
 .c-composer{display:flex;gap:8px;padding:10px;border-top:1px solid var(--wa-border);background:var(--wa-card)}
+.c-composer textarea.input{min-height:42px;max-height:140px;line-height:1.35;padding-top:12px;padding-bottom:12px}
 .icon-btn{background:transparent;border:1px solid var(--wa-border);color:var(--text);border-radius:10px;padding:8px 10px;cursor:pointer}
 .badge{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid #1b3a32;background:#0f1a16;color:#9be3c2;font-size:.82rem}
 @media (max-width:1023px){
