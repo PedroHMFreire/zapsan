@@ -10,20 +10,23 @@
 <body>
   <header class="topbar"><div class="topbar-inner">
     <div class="brand">Santê Console</div>
-    <nav class="menu">
-      <button class="m-btn" id="menu-flow">Fluxo do chatbot</button>
-      <button class="m-btn" id="menu-qr">Conectar QR</button>
-      <button class="m-btn" id="menu-schedule">Agendar envios</button>
-      <button class="m-btn" id="menu-tags">Etiquetar mensagem</button>
+    <nav class="menu" role="navigation" aria-label="Atalhos principais">
+      <button type="button" class="m-btn" id="menu-flow" aria-haspopup="dialog">Fluxo do chatbot</button>
+      <button type="button" class="m-btn" id="menu-qr" aria-haspopup="dialog">Conectar QR</button>
+      <button type="button" class="m-btn" id="menu-schedule" aria-haspopup="dialog">Agendar envios</button>
+      <button type="button" class="m-btn" id="menu-tags" aria-haspopup="dialog">Etiquetar mensagem</button>
     </nav>
-    <div class="badge" id="svc-badge">Carregando…</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+      <button type="button" class="m-btn" id="theme-toggle" aria-label="Alternar tema">🌙</button>
+      <div class="badge" id="svc-badge">Carregando…</div>
+    </div>
   </div></header>
 
   <div class="app" id="app">
     <aside class="sidebar">
       <div class="s-header">
         <div class="brand" style="font-size:15px">Conversas</div>
-        <div class="actions"><button class="icon-btn" id="new-chat">＋</button></div>
+  <div class="actions"><button type="button" class="icon-btn" id="new-chat" aria-label="Nova conversa">＋</button></div>
       </div>
       <div class="s-search"><input class="input" id="search" placeholder="Pesquisar conversas…"></div>
       <div class="s-filters">
@@ -37,7 +40,7 @@
     <section class="chat">
       <div class="c-header">
         <div class="peer">
-          <button class="icon-btn" id="back" style="display:none">←</button>
+          <button type="button" class="icon-btn" id="back" style="display:none" aria-label="Voltar">←</button>
           <div class="avatar"></div>
           <div class="meta">
             <div class="name" id="peer-name">Selecione uma conversa</div>
@@ -45,15 +48,15 @@
           </div>
         </div>
         <div class="actions">
-          <button class="icon-btn" id="chat-search">🔍</button>
-          <button class="icon-btn" id="chat-info">ℹ️</button>
+          <button type="button" class="icon-btn" id="chat-search" aria-label="Buscar na conversa">🔍</button>
+          <button type="button" class="icon-btn" id="chat-info" aria-label="Informações da conversa">ℹ️</button>
         </div>
       </div>
       <div class="c-messages" id="messages"></div>
       <form class="c-composer" id="composer">
-        <button type="button" class="icon-btn" id="attach">📎</button>
-        <input class="input" id="text" placeholder="Escreva uma mensagem…" autocomplete="off" />
-        <button class="btn" id="send">Enviar</button>
+  <button type="button" class="icon-btn" id="attach" aria-label="Anexar arquivo">📎</button>
+  <input class="input" id="text" placeholder="Escreva uma mensagem…" autocomplete="off" aria-label="Mensagem" />
+  <button type="submit" class="btn" id="send" aria-label="Enviar mensagem">Enviar</button>
       </form>
     </section>
   </div>
@@ -86,12 +89,16 @@
   const textInput=document.getElementById('text');
   const composer=document.getElementById('composer');
   let msgSeq=0; // contador sintético para IDs de mensagens
+  const LS_CHAT_KEY='last_chat_id';
 
   function renderChatList(){
     listEl.innerHTML='';
+    const lastId = localStorage.getItem(LS_CHAT_KEY);
     chats.forEach(c=>{
       const item=document.createElement('div');
       item.className='chat-item';
+      if(currentChat && currentChat.id===c.id) item.classList.add('is-active');
+      if(!currentChat && lastId && lastId===c.id) item.classList.add('is-active');
       item.innerHTML=`<div class="avatar"></div><div class="meta"><div class="name">${c.name}</div><div class="last">${c.last}</div></div><div class="time">${c.time}</div>`;
       item.onclick=()=>selectChat(c);
       listEl.appendChild(item);
@@ -100,6 +107,7 @@
 
   function selectChat(c){
     currentChat=c;
+    localStorage.setItem(LS_CHAT_KEY, c.id);
     peerName.textContent=c.name;
     messagesEl.innerHTML='';
     // mock initial messages
@@ -113,6 +121,12 @@
       app.dataset.view='chat';
       backBtn.style.display='inline-block';
     }
+    // atualizar destaque
+    document.querySelectorAll('.chat-item').forEach(el=>el.classList.remove('is-active'));
+    // pequeno atraso para garantir render (caso chamado antes do primeiro render final)
+    requestAnimationFrame(()=>{
+      [...document.querySelectorAll('.chat-item')].find(el=>el.textContent.includes(c.name))?.classList.add('is-active');
+    });
     scrollBottom();
   }
 
@@ -122,16 +136,10 @@
     el.className='msg '+(dir==='out'?'out':'in');
     el.setAttribute('data-id', id);
     el.textContent=text;
-    // etiqueta existente (se houver)
-    try {
-      const tags = JSON.parse(localStorage.getItem('tags')||'{}');
-      if(tags[id]){
-        const tagEl=document.createElement('div');
-        tagEl.className='meta';
-        tagEl.textContent='#'+tags[id];
-        el.appendChild(tagEl);
-      }
-    } catch {}
+    // etiqueta existente via API (fetch preguiçoso)
+    fetch('/tags').then(r=>r.ok?r.json():{tags:{}}).then(j=>{
+      const t=j.tags||{}; if(t[id]){ const tagEl=document.createElement('div'); tagEl.className='meta'; tagEl.textContent='#'+t[id]; el.appendChild(tagEl); }
+    }).catch(()=>{})
     // menu de contexto para etiquetar
     el.addEventListener('contextmenu', (e)=>{
       e.preventDefault();
@@ -192,6 +200,12 @@
   document.getElementById('new-chat').onclick=()=>toast('Funcionalidade futura');
 
   renderChatList();
+  // Restaurar última conversa se existir
+  const restoreId=localStorage.getItem(LS_CHAT_KEY);
+  if(restoreId){
+    const found=chats.find(c=>c.id===restoreId);
+    if(found) selectChat(found);
+  }
   // ==== Modal utilities & feature mocks ====
   function $(s,root=document){return root.querySelector(s)}
   function show(id){ $(id).classList.add('show') }
@@ -213,43 +227,51 @@
     window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank')
   })
 
-  // Fluxo do chatbot (mock)
-  function loadFlows(){ try{return JSON.parse(localStorage.getItem('flows')||'[]')}catch{return []}}
-  function saveFlows(f){ localStorage.setItem('flows', JSON.stringify(f)) }
-  $('#flow-save')?.addEventListener('click', ()=>{
+  // === Flows (API) ===
+  async function createFlow(){
     const name = $('#flow-name')?.value?.trim()||'Fluxo'
-    let json; try{ json = JSON.parse($('#flow-json')?.value || '[]') }catch(e){ return toast('JSON inválido','err') }
-    const flows = loadFlows(); flows.push({ id: Date.now().toString(36), name, nodes: json }); saveFlows(flows);
-    toast('Fluxo salvo'); hide($('#mdl-flow'))
-  })
+    let nodes; try{ nodes = JSON.parse($('#flow-json')?.value || '[]') }catch{ return toast('JSON inválido','err') }
+    try {
+      const r=await fetch('/flows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,nodes})})
+      if(!r.ok) return toast('Erro ao salvar fluxo','err')
+      toast('Fluxo salvo'); hide($('#mdl-flow'))
+    } catch { toast('Erro rede','err') }
+  }
+  $('#flow-save')?.addEventListener('click', createFlow)
 
-  // Agendar envios (mock)
-  function loadSchedules(){ try{return JSON.parse(localStorage.getItem('schedules')||'[]')}catch{return []}}
-  function saveSchedules(x){ localStorage.setItem('schedules', JSON.stringify(x)) }
-  function renderSchedules(){ const box = $('#sched-list'); if(!box) return; const arr = loadSchedules(); box.innerHTML = arr.length? arr.map(s=>`• ${new Date(s.when).toLocaleString()} → ${s.to}: "${s.text}"`).join('<br>') : 'Sem agendamentos.' }
+  // === Schedules (API) ===
+  async function fetchSchedules(){
+    try{ const r=await fetch('/schedules'); if(!r.ok) return []; const j=await r.json(); return j.schedules||[] }catch{return []}
+  }
+  async function renderSchedules(){ const box = $('#sched-list'); if(!box) return; const arr = await fetchSchedules(); box.innerHTML = arr.length? arr.map(s=>`• ${new Date(s.when).toLocaleString()} → ${s.to}: "${s.text}" <span style='opacity:.6'>(${s.status})</span>`).join('<br>') : 'Sem agendamentos.' }
   renderSchedules()
-  $('#sched-save')?.addEventListener('click', ()=>{
+  $('#sched-save')?.addEventListener('click', async ()=>{
     const session_id = $('#sched-session')?.value?.trim() || localStorage.getItem('session_id') || ''
     const to = $('#sched-to')?.value?.trim()
     const text = $('#sched-text')?.value?.trim()
     const when = $('#sched-when')?.value
     if(!session_id||!to||!text||!when) return toast('Preencha todos os campos','err')
-    const item = { id:Date.now(), session_id, to, text, when: new Date(when).toISOString() }
-    const arr = loadSchedules(); arr.push(item); saveSchedules(arr); renderSchedules(); toast('Agendado')
-    const delay = new Date(item.when).getTime() - Date.now()
-    if(delay > 0){ setTimeout(async ()=>{ try{ await fetch('/messages/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:item.session_id,to:item.to,text:item.text})}); toast('Mensagem enviada') }catch{ toast('Falha ao enviar','err') } }, delay) }
+    try{
+      const r=await fetch('/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id,to,text,when})})
+      if(!r.ok) return toast('Erro ao agendar','err')
+      toast('Agendado')
+      renderSchedules()
+    }catch{ toast('Erro rede','err') }
   })
 
-  // Etiquetas (mock)
-  function loadTags(){ try{return JSON.parse(localStorage.getItem('tags')||'{}')}catch{return {}}}
-  function saveTags(t){ localStorage.setItem('tags', JSON.stringify(t)) }
-  function renderTags(){ const box = $('#tag-list'); if(!box) return; const t = loadTags(); box.innerHTML = Object.keys(t).length? Object.entries(t).map(([k,v])=>`• ${k}: ${v}`).join('<br>') : 'Sem etiquetas.' }
+  // === Tags (API) ===
+  async function fetchTags(){ try{ const r=await fetch('/tags'); if(!r.ok) return {}; const j=await r.json(); return j.tags||{} }catch{return {}} }
+  async function renderTags(){ const box = $('#tag-list'); if(!box) return; const t = await fetchTags(); box.innerHTML = Object.keys(t).length? Object.entries(t).map(([k,v])=>`• ${k}: ${v}`).join('<br>') : 'Sem etiquetas.' }
   renderTags()
-  $('#tag-save')?.addEventListener('click', ()=>{
+  $('#tag-save')?.addEventListener('click', async ()=>{
     const id = $('#tag-msg-id')?.value?.trim()
     const label = $('#tag-label')?.value?.trim()
     if(!id||!label) return toast('Informe id e etiqueta','err')
-    const t = loadTags(); t[id]=label; saveTags(t); renderTags(); toast('Etiqueta aplicada')
+    try {
+      const r=await fetch('/tags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,label})})
+      if(!r.ok) return toast('Erro ao etiquetar','err')
+      toast('Etiqueta aplicada'); renderTags();
+    } catch { toast('Erro rede','err') }
   })
 
   // toast util fallback
@@ -259,6 +281,26 @@
       requestAnimationFrame(()=>t.classList.add('show')); setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500)
     }
   }
+
+  // === Theme Toggle ===
+  (function(){
+    const btn=document.getElementById('theme-toggle');
+    if(!btn) return;
+    const root=document.documentElement;
+    const KEY='theme_pref';
+    function apply(t){ if(t==='light'){ root.setAttribute('data-theme','light'); btn.textContent='🌙'; btn.setAttribute('aria-label','Usar tema escuro'); } else { root.removeAttribute('data-theme'); btn.textContent='☀️'; btn.setAttribute('aria-label','Usar tema claro'); } }
+    let pref=localStorage.getItem(KEY);
+    if(!pref){
+      // auto detect system
+      pref=window.matchMedia('(prefers-color-scheme: light)').matches? 'light':'dark';
+    }
+    apply(pref);
+    btn.addEventListener('click',()=>{
+      pref = (root.getAttribute('data-theme')==='light')? 'dark':'light';
+      localStorage.setItem(KEY,pref);
+      apply(pref);
+    });
+  })();
   </script>
 
   <!-- Fluxo do chatbot -->
