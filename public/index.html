@@ -74,10 +74,11 @@
 
   // Mock conversas
   const chats=[
-    { id:'5511999990001@s.whatsapp.net', name:'Loja Centro', last:'Pedido #123 preparado', time:'09:12' },
-    { id:'5511999990002@s.whatsapp.net', name:'Cliente VIP', last:'Pode enviar a NF?', time:'Ontem' },
-    { id:'5511999990003@s.whatsapp.net', name:'Fornecedor', last:'Entrega confirmada', time:'Seg' }
+    { id:'5511999990001@s.whatsapp.net', name:'Loja Centro', last:'Pedido #123 preparado', time:'09:12', unread:2, starred:false },
+    { id:'5511999990002@s.whatsapp.net', name:'Cliente VIP', last:'Pode enviar a NF?', time:'Ontem', unread:0, starred:true },
+    { id:'5511999990003@s.whatsapp.net', name:'Fornecedor', last:'Entrega confirmada', time:'Seg', unread:5, starred:false }
   ];
+  let activeFilter='all';
   let currentChat=null;
   const app=document.getElementById('app');
   const listEl=document.getElementById('chat-list');
@@ -94,20 +95,41 @@
   function renderChatList(){
     listEl.innerHTML='';
     const lastId = localStorage.getItem(LS_CHAT_KEY);
-    chats.forEach(c=>{
+    chats.filter(c=>{
+      if(activeFilter==='unread') return (c.unread||0) > 0;
+      if(activeFilter==='starred') return !!c.starred;
+      return true;
+    }).forEach(c=>{
       const item=document.createElement('div');
       item.className='chat-item';
       if(currentChat && currentChat.id===c.id) item.classList.add('is-active');
       if(!currentChat && lastId && lastId===c.id) item.classList.add('is-active');
-      item.innerHTML=`<div class="avatar"></div><div class="meta"><div class="name">${c.name}</div><div class="last">${c.last}</div></div><div class="time">${c.time}</div>`;
-      item.onclick=()=>selectChat(c);
+      const unreadBadge = (c.unread||0) > 0 ? `<span class="unread">${c.unread}</span>` : '';
+      const star = `<button class="star-btn" data-star="${c.id}" aria-label="Marcar favorito">${c.starred?'★':'☆'}</button>`;
+      item.innerHTML=`<div class="avatar"></div><div class="meta"><div class="name">${c.name} ${star}</div><div class="last">${c.last}</div></div><div class="time">${c.time} ${unreadBadge}</div>`;
+      item.addEventListener('click',(ev)=>{
+        const target = ev.target;
+        if(target && target.closest && target.closest('.star-btn')) return; // Evita abrir chat ao clicar no star
+        selectChat(c);
+      });
       listEl.appendChild(item);
     });
+    // Bind star buttons
+    listEl.querySelectorAll('.star-btn').forEach(btn=>{
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        const id = this.getAttribute('data-star');
+        const chat = chats.find(ch=>ch.id===id);
+        if(chat){ chat.starred=!chat.starred; renderChatList(); }
+      })
+    })
   }
 
   function selectChat(c){
     currentChat=c;
     localStorage.setItem(LS_CHAT_KEY, c.id);
+    // clear unread count when opened
+    c.unread=0;
     peerName.textContent=c.name;
     messagesEl.innerHTML='';
     // mock initial messages
@@ -198,6 +220,31 @@
 
   // New chat just demonstrates toast
   document.getElementById('new-chat').onclick=()=>toast('Funcionalidade futura');
+
+  // Filter chips
+  document.querySelectorAll('.s-filters .chip').forEach(chip=>{
+    chip.addEventListener('click',()=>{
+      document.querySelectorAll('.s-filters .chip').forEach(c=>c.classList.remove('is-active'));
+      chip.classList.add('is-active');
+      activeFilter = chip.getAttribute('data-filter')||'all';
+      renderChatList();
+    });
+  });
+
+  // Attachment button behavior (placeholder)
+  const attachBtn=document.getElementById('attach');
+  if(attachBtn){
+    const fileInput=document.createElement('input');
+    fileInput.type='file';
+    fileInput.style.display='none';
+    document.body.appendChild(fileInput);
+    attachBtn.addEventListener('click',()=>fileInput.click());
+    fileInput.addEventListener('change',()=>{
+      if(fileInput.files && fileInput.files[0]){
+        toast('Arquivo selecionado: '+fileInput.files[0].name);
+      }
+    });
+  }
 
   renderChatList();
   // Restaurar última conversa se existir
