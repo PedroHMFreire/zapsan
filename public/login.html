@@ -26,7 +26,7 @@
   <header class="topbar"><div class="topbar-inner" style="justify-content:center;">
     <div class="brand" style="font-size:15px;">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12c4-6 12-6 16 0-4 6-12 6-16 0Z" stroke="currentColor" stroke-width="2"/></svg>
-      Santê Console
+      Santê
     </div>
   </div></header>
   <main class="login-wrapper">
@@ -36,7 +36,7 @@
         Santê
       </div>
       <p style="margin:0 0 8px; font-size:13px; opacity:.8">Acesse o console para gerenciar sessões WhatsApp.</p>
-      <form>
+      <form id="login-form">
         <div class="field">
           <label for="email">Email</label>
           <input id="email" type="email" placeholder="voce@empresa.com" autocomplete="email" class="input" required />
@@ -45,25 +45,34 @@
           <label for="password">Senha / PIN</label>
             <input id="password" type="password" inputmode="numeric" placeholder="••••" class="input" required />
         </div>
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="remember" style="width:auto;" />
+          <label for="remember" style="margin:0;font-size:12px;opacity:.75;cursor:pointer;">Lembrar-me</label>
+        </div>
         <button class="btn" type="submit">Entrar</button>
         <div class="muted-link"><a href="#" onclick="alert('Recuperação de senha em breve');return false;">Esqueci a senha</a></div>
       </form>
     </div>
   </main>
   <script>
-    document.querySelector('form')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      // Simulação de autenticação (TODO: integrar backend real)
-      const ok = true;
-      if (ok) {
-        try { localStorage.setItem('auth','ok'); } catch {}
-        location.href = '/';
-      } else {
-        alert('Login inválido');
-      }
-    });
-    // Se já autenticado, pode redirecionar direto
-    try { if (localStorage.getItem('auth') === 'ok') { location.replace('/'); } } catch {}
+    (function(){
+      const form = document.getElementById('login-form');
+      const email = document.getElementById('email');
+      const pass = document.getElementById('password');
+      const remember = document.getElementById('remember');
+      form?.addEventListener('submit',(e)=>{
+        e.preventDefault();
+        const em=(email.value||'').trim();
+        const pw=(pass.value||'').trim();
+        if(!em||!pw){ alert('Preencha os campos'); return; }
+        try {
+          localStorage.setItem('auth','ok');
+          if(remember?.checked) localStorage.setItem('remember','1');
+        } catch {}
+        location.replace('/');
+      });
+      try { if (localStorage.getItem('auth') === 'ok') { location.replace('/'); } } catch {}
+    })();
   </script>
 </body>
 </html>
