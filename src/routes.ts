@@ -3,6 +3,7 @@ import { Router, Request, Response } from 'express'
 import { createOrLoadSession, getQR, sendText, getStatus } from './wa'
 import fs from 'fs'
 import path from 'path'
+import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
 
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -52,6 +53,30 @@ const r = Router()
 // Saúde do serviço
 r.get('/health', (_req: Request, res: Response) => {
   res.json({ ok: true, uptime: process.uptime() })
+})
+
+// Knowledge base endpoints
+r.get('/knowledge', (_req: Request, res: Response) => {
+  const k = loadKnowledge()
+  res.json({ updatedAt: k.mtimeMs, content: k.raw })
+})
+
+r.put('/knowledge', (req: Request, res: Response) => {
+  try {
+    const content = String(req.body?.content || '')
+    if (!content.trim()) return res.status(400).json({ error: 'empty_content' })
+    updateKnowledge(content)
+    const k = loadKnowledge()
+    res.json({ ok: true, updatedAt: k.mtimeMs })
+  } catch (err: any) {
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+r.get('/knowledge/sections', (req: Request, res: Response) => {
+  const q = String(req.query.q || '')
+  const sections = selectSections(q)
+  res.json({ sections: sections.map(s=>({ heading: s.heading, content: s.content, index: s.index, score: s.score })) })
 })
 
 // Criar/inicializar sessão

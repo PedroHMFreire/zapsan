@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { ReplyInput } from './types'
+import { selectSections } from './knowledge'
 import { logger } from './logger'
 import YAML from 'yaml'
 
@@ -34,7 +35,13 @@ Objetivo: ajudar o cliente a escolher produtos de moda. Se necessário, peça ta
 
 export async function reply(input: ReplyInput): Promise<string> {
   const cfg = loadBotConfig()
-  const system = buildSystemPrompt(cfg)
+  const systemBase = buildSystemPrompt(cfg)
+  // Selecionar seções relevantes da base de conhecimento
+  const sections = selectSections(input.text || '')
+  const contextBlock = sections.length
+    ? sections.map(s => `(Seção: ${s.heading})\n${s.content.trim()}`).join('\n\n')
+    : 'Nenhuma seção relevante encontrada. Solicite gentilmente mais detalhes ao cliente.'
+  const system = `${systemBase}\n\nINSTRUÇÕES DE CONTEXTO:\nVocê deve basear sua resposta SOMENTE no contexto abaixo.\nSe a informação não estiver presente, peça mais detalhes ou admita que precisa confirmar.\nNão invente produtos, políticas, tamanhos ou condições.\n\n[Contexto]\n${contextBlock}`
   const apiKey = process.env.OPENAI_API_KEY
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 

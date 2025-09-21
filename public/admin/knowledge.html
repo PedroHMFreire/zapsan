@@ -1,0 +1,77 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Base de Conhecimento</title><link rel="stylesheet" href="/styles.css" />
+<style>
+body{padding:20px}
+.layout{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch}
+textarea{width:100%;min-height:70vh;font-family:ui-monospace,monospace;font-size:14px;line-height:1.4;padding:14px;border-radius:12px;background:#0e171d;color:var(--text);border:1px solid var(--wa-border);}
+.preview{background:var(--wa-panel);border:1px solid var(--wa-border);border-radius:12px;padding:16px;overflow:auto;white-space:pre-wrap;}
+.actions{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.badge{font-size:.75rem}
+@media (max-width:980px){.layout{grid-template-columns:1fr}}
+</style>
+</head><body>
+<h1>Base de Conhecimento</h1>
+<div class="actions">
+  <button class="btn" id="save">Salvar</button>
+  <button class="m-btn" id="reload">Recarregar</button>
+  <div class="badge" id="status">—</div>
+</div>
+<div class="layout">
+  <div>
+    <h3>Markdown</h3>
+    <textarea id="editor" placeholder="Carregando..."></textarea>
+  </div>
+  <div>
+    <h3>Preview (simples)</h3>
+    <div class="preview" id="preview"></div>
+    <h3>Seções Relevantes (busca)</h3>
+    <input class="input" id="q" placeholder="Buscar..." />
+    <div id="sections" class="help" style="margin-top:10px"></div>
+  </div>
+</div>
+<script>
+function toast(msg){const t=document.createElement('div');t.className='toast ok';t.textContent=msg;document.body.appendChild(t);requestAnimationFrame(()=>t.classList.add('show'));setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),200)},2000)}
+const editor=document.getElementById('editor');
+const preview=document.getElementById('preview');
+const statusEl=document.getElementById('status');
+function renderPreview(md){
+  // preview mínima (sem lib) – apenas headings e listas
+  let html=md
+    .replace(/^### (.*)$/gm,'<h3>$1</h3>')
+    .replace(/^## (.*)$/gm,'<h2>$1</h2>')
+    .replace(/^# (.*)$/gm,'<h1>$1</h1>')
+    .replace(/^- (.*)$/gm,'• $1')
+    .replace(/\n{2,}/g,'\n\n');
+  preview.innerHTML=html;
+}
+async function load(){
+  const r=await fetch('/knowledge');
+  if(!r.ok) return;
+  const j=await r.json();
+  editor.value=j.content||'';
+  statusEl.textContent='Atualizado: '+new Date(j.updatedAt).toLocaleString();
+  renderPreview(editor.value);
+}
+load();
+editor.addEventListener('input',()=>renderPreview(editor.value));
+
+document.getElementById('save').addEventListener('click',async()=>{
+  const content=editor.value;
+  const r=await fetch('/knowledge',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});
+  if(!r.ok) return toast('Erro ao salvar');
+  toast('Salvo'); load();
+});
+
+document.getElementById('reload').addEventListener('click',load);
+
+// Busca de seções
+const q=document.getElementById('q');
+q.addEventListener('input',async()=>{
+  const term=q.value.trim();
+  const r=await fetch('/knowledge/sections?q='+encodeURIComponent(term));
+  if(!r.ok) return;
+  const j=await r.json();
+  const html=j.sections.map(s=>`<div style='margin:6px 0'><strong>${s.heading}</strong><br><small>${(s.content||'').slice(0,160)}...</small></div>`).join('') || 'Nenhuma';
+  document.getElementById('sections').innerHTML=html;
+});
+</script>
+</body></html>
