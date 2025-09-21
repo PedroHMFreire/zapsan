@@ -184,6 +184,10 @@ button:focus-visible, .input:focus-visible, .chip:focus-visible{outline:2px soli
 [data-theme='light'] .chip{background:#f1f5f4;border-color:#d5e1e5;color:#1f2a30}
 [data-theme='light'] .chip.is-active{background:#d9efe8;border-color:#b2d7cb}
 
+/* Flow IA extras */
+.cb-block input.input{font-size:13px}
+.cb-block textarea.input{font-size:13px}
+
 /* Unread badge & star styles (new) */
 .chat-item .unread{background:var(--wa-accent,#25d366);color:#fff;border-radius:12px;padding:0 6px;font-size:11px;line-height:18px;display:inline-block;margin-left:4px;font-weight:600}
 .chat-item .star-btn{background:none;border:none;cursor:pointer;font-size:14px;margin-left:4px;color:var(--muted);transition:color .15s}

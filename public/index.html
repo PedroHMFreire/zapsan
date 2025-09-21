@@ -11,7 +11,7 @@
   <header class="topbar"><div class="topbar-inner">
     <div class="brand">Santê Console</div>
     <nav class="menu" role="navigation" aria-label="Atalhos principais">
-      <button type="button" class="m-btn" id="menu-flow" aria-haspopup="dialog">Fluxo do chatbot</button>
+  <button type="button" class="m-btn" id="menu-flow" aria-haspopup="dialog">Fluxo IA</button>
       <button type="button" class="m-btn" id="menu-qr" aria-haspopup="dialog">Conectar QR</button>
       <button type="button" class="m-btn" id="menu-schedule" aria-haspopup="dialog">Agendar envios</button>
       <button type="button" class="m-btn" id="menu-tags" aria-haspopup="dialog">Etiquetar mensagem</button>
@@ -371,17 +371,34 @@
   })();
   </script>
 
-  <!-- Fluxo do chatbot -->
+  <!-- Fluxo IA -->
   <div class="modal" id="mdl-flow">
     <div class="modal-card">
-      <div class="modal-h"><strong>Fluxo do chatbot</strong><button class="m-btn" data-close>✕</button></div>
+      <div class="modal-h"><strong>Fluxo IA</strong><button class="m-btn" data-close>✕</button></div>
       <div class="modal-b">
-        <p class="help">Monte um fluxo simples de nós e respostas (mock). Depois plugamos no config/bot.yaml.</p>
-        <div class="row"><span class="label">Nome do fluxo</span><input class="input" id="flow-name" placeholder="Ex. Recepção Santê"></div>
-        <div class="row"><span class="label">Nós</span><textarea class="input" id="flow-json" rows="8" placeholder='[{"id":"start","text":"Olá!","next":"menu"}]'></textarea></div>
-        <div class="help">Formato JSON minimal: id, text, next (ou options:[{label,next}]).</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap" id="flow-tabs">
+          <button type="button" class="chip is-active" data-tab="chatbot">Criar Chatbot</button>
+          <button type="button" class="chip" data-tab="iaform">Formulário IA</button>
+        </div>
+        <div id="tab-chatbot">
+          <p class="help">Defina sequência de perguntas e respostas do chatbot (estrutura simples).</p>
+          <div class="row"><span class="label">Nome</span><input class="input" id="cb-name" placeholder="Ex. Recepção"></div>
+          <div class="row" style="align-items:flex-start"><span class="label">Blocos</span>
+            <div style="flex:1" id="cb-blocks"></div>
+          </div>
+          <button type="button" class="m-btn" id="cb-add">Adicionar bloco</button>
+          <div class="help">Cada bloco: pergunta feita ao cliente e resposta padrão ou próxima ação.</div>
+        </div>
+        <div id="tab-iaform" style="display:none">
+          <p class="help">Texto base usado pela IA antes de responder. Complementa a Base de Conhecimento.</p>
+          <textarea class="input" id="ia-free" rows="10" placeholder="Insira informações adicionais do negócio..."></textarea>
+          <div class="help">Salve para atualizar o contexto. Use este campo para campanhas, políticas temporárias etc.</div>
+        </div>
       </div>
-      <div class="modal-f"><button class="m-btn" data-close>Cancelar</button><button class="btn" id="flow-save">Salvar fluxo</button></div>
+      <div class="modal-f" id="flow-actions">
+        <button class="m-btn" data-close>Fechar</button>
+        <button class="btn" id="flow-save">Salvar</button>
+      </div>
     </div>
   </div>
 
@@ -455,11 +472,47 @@
     });
 
     $('#flow-save')?.getAttribute('data-bound') || $('#flow-save')?.addEventListener('click', async ()=>{
-      const nameEl = $('#flow-name');
-      const jsonEl = $('#flow-json');
-      const name = (nameEl && nameEl.value ? nameEl.value.trim() : '') || 'Fluxo';
-      let nodes=[]; try{ nodes = JSON.parse(jsonEl && jsonEl.value ? jsonEl.value : '[]') }catch{return toast('JSON inválido','err')}
-      try{ const r=await fetch('/flows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,nodes})}); if(!r.ok) return toast('Erro ao salvar fluxo','err'); toast('Fluxo salvo'); $('#mdl-flow')?.classList.remove('show'); }catch{toast('Erro rede','err')}
+      // Determine active tab
+      const activeTab = document.querySelector('#flow-tabs .chip.is-active')?.getAttribute('data-tab');
+      if(activeTab==='chatbot'){
+        const nameEl = document.getElementById('cb-name');
+        const name = nameEl && nameEl.value ? nameEl.value.trim() : 'Fluxo';
+        // Collect blocks
+        const blocks = [];
+        document.querySelectorAll('.cb-block').forEach((blk,i)=>{
+          const qEl = blk.querySelector('[data-q]');
+          const aEl = blk.querySelector('[data-a]');
+          const q = qEl && qEl.value ? qEl.value.trim() : '';
+          const a = aEl && aEl.value ? aEl.value.trim() : '';
+          if(q||a){ blocks.push({ id:'b'+i, question:q||'', answer:a||'' }) }
+        });
+        try{
+          const r=await fetch('/flows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,nodes:blocks})});
+          if(!r.ok) return toast('Erro ao salvar fluxo','err');
+          toast('Fluxo salvo');
+          if(nameEl) nameEl.value='';
+          const blkWrap = document.getElementById('cb-blocks');
+          if(blkWrap) blkWrap.innerHTML='';
+        }catch{ toast('Erro rede','err') }
+      } else if(activeTab==='iaform') {
+        const extraEl = document.getElementById('ia-free');
+        const extra = extraEl && extraEl.value ? extraEl.value : '';
+        // Merge with existing knowledge file (append at end under heading)
+        try {
+          const k= await fetch('/knowledge');
+          const base = k.ok? (await k.json()).content : '';
+          let updated = base;
+          const marker = '\n\n# Extra IA';
+          if(base.includes('# Extra IA')){
+            updated = base.replace(/(# Extra IA[\s\S]*)$/,'# Extra IA\n'+extra.trim()+"\n");
+          } else {
+            updated = base.trim()+ marker + '\n'+ extra.trim()+'\n';
+          }
+          const r=await fetch('/knowledge',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:updated})});
+          if(!r.ok) return toast('Erro ao salvar IA','err');
+          toast('Contexto IA salvo');
+        }catch{ toast('Erro rede','err') }
+      }
     });
 
     $('#sched-save')?.getAttribute('data-bound') || $('#sched-save')?.addEventListener('click', async ()=>{
@@ -485,6 +538,47 @@
     $('#menu-qr')?.addEventListener('click', ()=>$('#mdl-qr')?.classList.add('show'))
     $('#menu-schedule')?.addEventListener('click', ()=>$('#mdl-schedule')?.classList.add('show'))
     $('#menu-tags')?.addEventListener('click', ()=>$('#mdl-tags')?.classList.add('show'))
+
+    // Tabs handling
+    const tabs=document.getElementById('flow-tabs');
+    tabs?.addEventListener('click',(e)=>{
+      const t=e.target;
+      if(!(t && t.closest)) return;
+      const chip = t.closest('.chip');
+      if(!chip) return;
+      tabs.querySelectorAll('.chip').forEach(c=>c.classList.remove('is-active'));
+      chip.classList.add('is-active');
+      const tab = chip.getAttribute('data-tab');
+      const tabChat = document.getElementById('tab-chatbot');
+      const tabIA = document.getElementById('tab-iaform');
+      if(tabChat) tabChat.style.display = tab==='chatbot'? 'block':'none';
+      if(tabIA) tabIA.style.display = tab==='iaform'? 'block':'none';
+      if(tab==='iaform') loadIAExtra();
+    });
+
+    // Chatbot block builder
+    function addBlock(q='',a=''){
+      const wrap=document.createElement('div');
+      wrap.className='cb-block';
+      wrap.style.cssText='border:1px solid var(--wa-border);padding:10px;border-radius:10px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px;background:var(--wa-panel)';
+      wrap.innerHTML=`<input data-q class="input" placeholder="Pergunta" value="${q}" />\n<textarea data-a class="input" rows="2" placeholder="Resposta"></textarea>\n<button type="button" class="m-btn cb-del">Remover</button>`;
+      const del = wrap.querySelector('.cb-del'); if(del) del.addEventListener('click',()=>wrap.remove());
+      const ans = wrap.querySelector('[data-a]'); if(ans) ans.value=a;
+      const blocksContainer=document.getElementById('cb-blocks');
+      if(blocksContainer) blocksContainer.appendChild(wrap);
+    }
+    document.getElementById('cb-add')?.addEventListener('click',()=>addBlock());
+
+    // Load IA extra section into textarea
+    async function loadIAExtra(){
+      try{
+        const r=await fetch('/knowledge'); if(!r.ok) return;
+        const j=await r.json();
+        const match = j.content.match(/# Extra IA[\r\n]+([\s\S]*)$/);
+        const iaFree = document.getElementById('ia-free');
+        if(iaFree) iaFree.value = match? match[1].trim():'';
+      }catch{}
+    }
   })();
   </script>
 </body>
