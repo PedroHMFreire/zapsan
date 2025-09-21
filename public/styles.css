@@ -1,4 +1,63 @@
-:root { color-scheme: light dark; }
+/* === Design Tokens Santê === */
+:root {
+  color-scheme: light dark;
+  --bg: #0b0c10;
+  --bg-2: #111318;
+  --card: #141820;
+  --text: #e6e8ec;
+  --muted: #9aa3af;
+  --brand: #69e4a6;
+  --brand-2: #44c78a;
+  --danger: #ef4444;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --radius: 16px;
+  --space: 14px;
+  --shadow: 0 8px 24px rgba(0,0,0,.25);
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+[data-theme='light']{
+  --bg:#f6f7f9;
+  --bg-2:#fff;
+  --card:#fff;
+  --text:#0b0c10;
+  --muted:#5b616e;
+  --brand:#0bb978;
+  --brand-2:#07a868;
+}
+html,body { margin:0; padding:0; background: var(--bg); color: var(--text); font-family: var(--font); }
+a, button, input, textarea { font-size:16px; }
+h1, h2, h3 { line-height:1.2; font-weight:600; }
+h1 { font-size:22px; }
+h2 { font-size:20px; }
+h3 { font-size:18px; }
+a { color: var(--brand); text-decoration:none; }
+a:hover { opacity:.9; }
+.btn { border:0; border-radius:12px; padding:12px 18px; background: var(--brand); color:#041310; font-weight:700; cursor:pointer; transition: background .2s, transform .15s; min-height:44px; }
+.btn:hover { background: var(--brand-2); }
+.btn:active { transform: translateY(1px); }
+.btn.secondary { background:#1e242c; color: var(--text); font-weight:500; }
+.btn.secondary:hover { background:#242c36; }
+.input, input, textarea { width:100%; padding:12px 16px; border-radius:12px; border:1px solid #222733; background:#0f1218; color: var(--text); min-height:44px; }
+.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--space); border:1px solid #1f2730; }
+.grid { display:grid; gap: var(--space); }
+.grid.cols-2 { grid-template-columns:1fr; }
+.container { max-width:980px; margin:0 auto; padding:20px; }
+img#qrimg { width:100%; max-width:320px; display:block; margin:0 auto; }
+.toast{position:fixed;right:16px;bottom:16px;background:#0d1117;color:#e6e8ec;padding:12px 14px;border-radius:12px;box-shadow:var(--shadow);opacity:0;transform:translateY(8px);transition:.25s;z-index:9999;font-size:14px;}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.ok{border:1px solid #1f4633;background:#0f1a16}
+.toast.err{border:1px solid #3f1d1d;background:#190f0f}
+.skeleton{border-radius:12px;background:linear-gradient(90deg,#121620,#161b27,#121620);background-size:200% 100%;animation:shimmer 1.1s infinite;}
+@keyframes shimmer{0%{background-position:0% 0}100%{background-position:200% 0}}
+.topbar { position:sticky; top:0; z-index:50; backdrop-filter: saturate(140%) blur(8px); background:rgba(10,12,16,.7); border-bottom:1px solid #1b1f27; }
+.topbar-inner { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; }
+.brand { display:flex; gap:10px; align-items:center; font-weight:800; }
+.badge { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:#0f1513; border:1px solid #1f2a24; color:#98f2c5; font-size:12px; letter-spacing:.5px; }
+
+.muted { color: var(--muted); font-size:.925rem; }
+
+/* === Fim tokens; estilos originais mantidos abaixo para compat === */
 * { box-sizing: border-box; }
 body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background: #0b0d10; color: #f2f5f7; }
 a { color: #9bd; text-decoration: none; }
@@ -19,4 +78,8 @@ h1 { font-size: 20px; margin: 0; }
 footer { text-align: center; opacity: .7; padding: 16px; font-size: 12px; }
 @media (min-width: 640px) {
   h1 { font-size: 24px; }
+}
+@media (min-width: 768px){
+  .container { max-width:1100px; }
+  .grid.cols-2 { grid-template-columns:1fr 1fr; }
 }

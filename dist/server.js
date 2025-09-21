@@ -14,6 +14,13 @@ const routes_1 = __importDefault(require("./routes"));
 (0, dns_1.setDefaultResultOrder)('ipv4first');
 // __dirname já existe em CommonJS; remoção de import.meta para evitar erro de compilação
 const app = (0, express_1.default)();
+// Captura falhas não tratadas cedo para evitar saída silenciosa em produção (Render, etc.)
+process.on('unhandledRejection', (reason) => {
+    logger_1.logger.error({ reason }, 'Unhandled Rejection');
+});
+process.on('uncaughtException', (err) => {
+    logger_1.logger.error({ err }, 'Uncaught Exception');
+});
 // Middlewares básicos
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());

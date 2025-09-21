@@ -7,31 +7,113 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header><h1>ZapSan</h1></header>
-  <div class="container">
-    <div class="card">
+  <header class="topbar"><div class="topbar-inner">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 12c4-6 12-6 16 0-4 6-12 6-16 0Z" stroke="currentColor" stroke-width="2"/></svg>
+      Santê Console
+    </div>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <button id="theme-toggle" class="btn secondary" style="padding:6px 12px; min-height:36px; font-size:14px; line-height:1;">☀︎</button>
+      <div class="badge">ZapSan</div>
+    </div>
+  </div></header>
+  <main class="container grid" style="grid-template-columns:1fr; margin-top:16px;" id="dash">
+    <div class="card" id="card-create">
+      <h2 style="margin:0 0 8px; font-size:18px;">Criar sessão</h2>
+      <p style="margin:0 0 12px; font-size:13px; opacity:.8">Inicie uma nova sessão WhatsApp escaneando o QR code.</p>
       <form id="session-form">
         <label for="session_id">Session ID</label>
-        <input id="session_id" placeholder="ex.: loja-sante-a1" autocomplete="off" />
-        <div class="row" style="margin-top:8px">
-          <button type="submit" class="btn" id="btnCreate">Criar sessão</button>
-          <button type="button" class="btn secondary" id="btnQR">Ver QR</button>
-          <button type="button" class="btn secondary" id="btnChat">Entrar no Chat</button>
+        <input id="session_id" class="input" placeholder="ex.: loja-sante-a1" autocomplete="off" />
+        <div class="row" style="margin-top:12px">
+          <button type="submit" class="btn" id="btnCreate">Criar & QR</button>
         </div>
+        <p id="status" style="margin-top:8px; font-size:12px; opacity:.75"></p>
       </form>
-      <p id="status" style="margin-top:8px; font-size:14px; opacity:.85"></p>
     </div>
-    <footer>Servidor único com Baileys + REST + Páginas. Edite <code>config/bot.yaml</code> para personalizar o atendente.</footer>
-  </div>
+    <div class="card" id="card-qr">
+      <h2 style="margin:0 0 8px; font-size:18px;">Ver QR</h2>
+      <p style="margin:0 0 12px; font-size:13px; opacity:.8">Acesse o código de pareamento de uma sessão existente.</p>
+      <button type="button" class="btn secondary" id="btnQR">Abrir página de QR</button>
+    </div>
+    <div class="card" id="card-chat">
+      <h2 style="margin:0 0 8px; font-size:18px;">Chat</h2>
+      <p style="margin:0 0 12px; font-size:13px; opacity:.8">Interaja com contatos através da sessão autenticada.</p>
+      <button type="button" class="btn secondary" id="btnChat">Entrar no Chat</button>
+    </div>
+    <div class="card" id="card-status">
+      <h2 style="margin:0 0 8px; font-size:18px; display:flex; align-items:center; gap:8px;">Status WhatsApp <span id="badgeStatus" class="badge" style="font-size:11px;">Verificando...</span></h2>
+      <p style="margin:0 0 12px; font-size:13px; opacity:.8">Estado geral da API e uptime do servidor.</p>
+      <button type="button" class="btn secondary" id="btnRefreshStatus">Atualizar status</button>
+    </div>
+  </main>
+  <footer class="container" style="margin-top:28px;">Servidor único com Baileys + REST + Páginas. Edite <code>config/bot.yaml</code> para personalizar o atendente.</footer>
+  <style>
+    @media (min-width:768px){
+      #dash { grid-template-columns: repeat(2, 1fr); }
+    }
+    #dash h2 { font-weight:600; }
+    .toast {
+      position: fixed;
+      z-index: 10000;
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 200px;
+      max-width: 300px;
+      padding: 12px 16px;
+      margin: 0 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.4;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+    .toast.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .toast.ok {
+      background-color: #0f1513;
+      color: #98f2c5;
+    }
+    .toast.err {
+      background-color: #3a1a1a;
+      color: #fca5a5;
+    }
+  </style>
   <script>
+    // Toast util
+    function toast(msg,type='ok'){
+      const t=document.createElement('div');
+      t.className='toast '+type;
+      t.textContent=msg;
+      document.body.appendChild(t);
+      requestAnimationFrame(()=>t.classList.add('show'));
+      setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500);
+    }
+    // Inicializa tema salvo
+    const root=document.documentElement;
+    const saved=localStorage.getItem('theme')||'dark';
+    root.setAttribute('data-theme', saved);
+    const toggleBtn=document.getElementById('theme-toggle');
+    if(saved==='light' && toggleBtn) toggleBtn.textContent='🌙';
+    toggleBtn?.addEventListener('click', ()=>{
+      const v=root.getAttribute('data-theme')==='dark'?'light':'dark';
+      root.setAttribute('data-theme',v);
+      localStorage.setItem('theme',v);
+      if(toggleBtn) toggleBtn.textContent = v==='light'?'🌙':'☀︎';
+    });
+
     const form = document.querySelector('#session-form');
     const input = document.querySelector('#session_id');
     const statusEl = document.getElementById('status');
+    const badgeStatus = document.getElementById('badgeStatus');
+    const btnRefreshStatus = document.getElementById('btnRefreshStatus');
 
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const id = (input?.value || '').trim();
-      if (!id) return alert('Informe um session_id');
+      if (!id) { toast('Informe um session_id','err'); return; }
       statusEl.textContent = 'Criando sessão...';
       try {
         const r = await fetch('/sessions/create', {
@@ -40,29 +122,55 @@
           body: JSON.stringify({ session_id: id })
         });
         if (r.ok) {
+          toast('Sessão criada');
           location.href = `/qr.html?session_id=${encodeURIComponent(id)}`;
         } else {
           const j = await r.json().catch(()=>({}));
-            alert('Erro ao criar sessão: ' + (j.message || j.error || r.status));
-            statusEl.textContent = 'Falha ao criar sessão';
+          toast('Falha ao criar sessão','err');
+          statusEl.textContent = 'Falha ao criar sessão';
         }
       } catch (err) {
-        alert('Erro de rede ao criar sessão');
+        toast('Erro de rede','err');
         statusEl.textContent = 'Erro de rede';
       }
     });
 
     document.getElementById('btnQR')?.addEventListener('click', () => {
       const id = (input?.value || '').trim();
-      if (!id) return alert('Informe um session_id');
+      if (!id) { toast('Informe um session_id','err'); return; }
       location.href = `/qr.html?session_id=${encodeURIComponent(id)}`;
     });
 
     document.getElementById('btnChat')?.addEventListener('click', () => {
       const id = (input?.value || '').trim();
-      if (!id) return alert('Informe um session_id');
+      if (!id) { toast('Informe um session_id','err'); return; }
       location.href = `/chat.html?session_id=${encodeURIComponent(id)}`;
     });
+
+    async function refreshHealth(){
+      if(!badgeStatus) return;
+      try {
+        const r = await fetch('/health');
+        if(r.ok){
+          const j = await r.json().catch(()=>({}));
+          badgeStatus.textContent = 'Online';
+          badgeStatus.style.background = '#0f1513';
+          badgeStatus.style.color = '#98f2c5';
+          badgeStatus.title = `uptime: ${Math.round(j.uptime||0)}s`;
+        } else {
+          badgeStatus.textContent = 'Offline';
+          badgeStatus.style.background = '#3a1a1a';
+          badgeStatus.style.color = '#fca5a5';
+        }
+      } catch {
+        badgeStatus.textContent = 'Offline';
+        badgeStatus.style.background = '#3a1a1a';
+        badgeStatus.style.color = '#fca5a5';
+      }
+    }
+    btnRefreshStatus?.addEventListener('click', refreshHealth);
+    refreshHealth();
+    setInterval(refreshHealth, 15000);
   </script>
 </body>
 </html>

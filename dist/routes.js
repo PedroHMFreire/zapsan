@@ -1,7 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+// Update the import to match the actual exported member names from './wa'
 const wa_1 = require("./wa");
+// If 'createOrLoadSession' exists but is exported with a different name, import it accordingly:
+// import { actualExportedName as createOrLoadSession, getQR, sendText } from './wa'
 const r = (0, express_1.Router)();
 // Saúde do serviço
 r.get('/health', (_req, res) => {
@@ -49,6 +52,17 @@ r.post('/messages/send', async (req, res) => {
     catch (err) {
         const code = err?.message === 'session_not_found' ? 404 : 500;
         return res.status(code).json({ error: err?.message || 'internal_error' });
+    }
+});
+// Status da sessão
+r.get('/sessions/:id/status', (req, res) => {
+    try {
+        const { id } = req.params;
+        const status = (0, wa_1.getStatus)(id);
+        return res.json(status);
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
 exports.default = r;

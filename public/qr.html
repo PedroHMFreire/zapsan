@@ -10,17 +10,32 @@
   <header><h1>Escaneie o QR com o WhatsApp</h1></header>
   <div class="container">
     <div class="card" style="text-align:center">
-      <img id="qrimg" alt="QR" style="width: 320px; max-width: 100%; border-radius: 12px; background:#fff" />
+      <div class="steps" style="display:flex;justify-content:center;gap:12px;margin:0 0 16px;font-size:12px;letter-spacing:.5px;">
+        <span class="step" style="opacity:.6;">1. Sessão</span>
+        <span class="step active" style="padding:4px 8px;border-radius:999px;background:rgba(105,228,166,.15);color:var(--brand);font-weight:600;">2. QR</span>
+        <span class="step" style="opacity:.6;">3. Conectado</span>
+      </div>
+      <div id="qrSkeleton" class="skeleton" style="width:100%;max-width:320px;height:320px;margin:0 auto;border-radius:12px;"></div>
+      <img id="qrimg" alt="QR" style="width: 320px; max-width: 100%; border-radius: 12px; background:#fff; display:none" />
       <p id="hint" style="margin-top:8px; font-size:14px; opacity:.85">Abra o WhatsApp > Conectar um dispositivo</p>
       <p id="status" style="margin-top:4px; font-size:14px; opacity:.85"></p>
-      <p id="status-note" style="margin-top:4px; font-size:13px; opacity:.75"></p>
+      <p id="status-note" class="muted" style="margin-top:4px;"></p>
       <a href="/" class="btn secondary" style="display:inline-block;margin-top:8px">Voltar</a>
     </div>
   </div>
   <script>
+    function toast(msg,type='ok'){
+      const t=document.createElement('div');
+      t.className='toast '+type;
+      t.textContent=msg;
+      document.body.appendChild(t);
+      requestAnimationFrame(()=>t.classList.add('show'));
+      setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500);
+    }
     const params = new URLSearchParams(location.search);
     const id = params.get('session_id');
     const img = document.querySelector('#qrimg');
+    const skel = document.getElementById('qrSkeleton');
     const statusEl = document.getElementById('status');
     const note = document.getElementById('status-note');
 
@@ -30,7 +45,11 @@
         const r = await fetch(`/sessions/${encodeURIComponent(id)}/qr`);
         if (r.ok) {
           const { dataUrl } = await r.json();
-          if (dataUrl && img) img.src = dataUrl;
+          if (dataUrl && img) {
+            img.src = dataUrl;
+            if(skel) skel.style.display='none';
+            img.style.display='block';
+          }
           statusEl.textContent = 'Leia o QR acima.';
         } else {
           statusEl.textContent = 'Aguardando QR...';
@@ -40,6 +59,7 @@
       }
     }
 
+    let redirected = false;
     async function pollStatus() {
       if (!id) return;
       try {
@@ -47,8 +67,12 @@
         if (!r.ok) return;
         const s = await r.json();
         if (note) note.textContent = `Status: ${s.state}`;
-        if (s.state === 'open') {
-          location.href = `/chat.html?session_id=${encodeURIComponent(id)}`;
+        if (s.state === 'open' && !redirected) {
+          redirected = true;
+          toast('Conectado!');
+          setTimeout(() => {
+            location.href = `/chat.html?session_id=${encodeURIComponent(id)}`;
+          }, 1200);
         }
       } catch {}
     }
