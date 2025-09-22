@@ -30,6 +30,8 @@ type Sess = {
   startingSince?: number
   lastDisconnectCode?: number
   restartCount?: number
+  criticalCount?: number
+  nextRetryAt?: number
 }
 
 const sessions = new Map<string, Sess>()
@@ -53,7 +55,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
   const baseDir = path.join(SESS_DIR, sessionId)
   ensureDir(baseDir)
-  sessions.set(sessionId, { baseDir, starting: true, startingSince: Date.now(), qr: null, restartCount: (current?.restartCount||0) })
+  sessions.set(sessionId, { baseDir, starting: true, startingSince: Date.now(), qr: null, restartCount: (current?.restartCount||0), criticalCount: current?.criticalCount || 0 })
 
   const boot = async () => {
     const sess = sessions.get(sessionId)!
@@ -98,8 +100,10 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         }
       }
       if (u.connection === 'open') {
+        // conectado: limpar QR
         sess.qr = null
         sess.qrDataUrl = null
+        sess.criticalCount = 0
       }
 
       if (u.connection === 'close') {
@@ -117,16 +121,25 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
         // >>> Correção 2: em 515/401, resetar credenciais e re-parear
         if (isStreamErrored || isLoggedOut) {
-          console.warn('[wa][disconnect-critical]', sessionId, { code, isStreamErrored, isLoggedOut })
-          nukeDir(baseDir) // limpa a sessão corrompida
-          sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'restarting', qrDataUrl: null, restartCount: (sess.restartCount||0)+1 })
-          setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 5000)
+          const crit = (sess.criticalCount||0)+1
+            sess.criticalCount = crit
+          // backoff exponencial simples: 3s * 2^(crit-1), cap 30000ms
+          const delay = Math.min(30000, 3000 * Math.pow(2, Math.max(0, crit-1)))
+          const shouldNuke = isLoggedOut || crit >= 3 // só apaga após 3 falhas 515 seguidas ou logout
+          console.warn('[wa][disconnect-critical]', sessionId, { code, crit, delay, willNuke: shouldNuke })
+          if (shouldNuke) {
+            nukeDir(baseDir)
+          }
+          sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'restarting', qrDataUrl: sess.qrDataUrl || null, restartCount: (sess.restartCount||0)+1, criticalCount: sess.criticalCount, nextRetryAt: Date.now()+delay })
+          setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), delay)
           return
         }
 
         // outros motivos (timeout, rede etc) → tenta reconectar preservando auth
-        sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null, restartCount: (sess.restartCount||0)+1 })
-        setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 1500)
+        // reconexão leve (rede): manter QR se ainda não conectou / útil para pairing
+        const lightDelay = 1500
+        sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null, restartCount: (sess.restartCount||0)+1, criticalCount: sess.criticalCount||0, nextRetryAt: Date.now()+lightDelay })
+        setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), lightDelay)
       }
     })
   }
@@ -139,7 +152,10 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 // === API ORIGINAL ===
 export function getQR(sessionId: string): string | null {
   const s = sessions.get(sessionId)
-  return s?.qr || null
+  // Enquanto estiver em processos de conexão/reconexão, devolver último QR disponível
+  if (!s) return null
+  if (s.qr) return s.qr
+  return null
 }
 
 // === API ORIGINAL ===
@@ -175,6 +191,9 @@ export function getDebug(sessionId: string) {
     startingSince: s.startingSince,
     msStarting: s.startingSince? Date.now()-s.startingSince : null,
     lastDisconnectCode: s.lastDisconnectCode,
-    restartCount: s.restartCount||0
+    restartCount: s.restartCount||0,
+    criticalCount: s.criticalCount||0,
+    nextRetryAt: s.nextRetryAt || null,
+    msUntilRetry: s.nextRetryAt ? Math.max(0, s.nextRetryAt - Date.now()) : null
   }
 }
