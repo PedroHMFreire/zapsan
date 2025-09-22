@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>ZapSan • Login</title>
+  <title>ZapSan • Acesso</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 24 24' fill='none' stroke='%2369e4a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12c4-6 12-6 16 0-4 6-12 6-16 0Z'/%3E%3C/svg%3E"/>
   <link rel="stylesheet" href="/styles.css" />
   <style>
@@ -31,8 +31,23 @@
     .muted-link { font-size:12px; text-align:right; margin-top:2px; }
     .muted-link a { color:var(--muted); }
     .muted-link a:hover { color:var(--wa-accent); }
-    .error-box { display:none; background:#301b1b; border:1px solid #5e2727; color:#fca5a5; padding:10px 12px; border-radius:10px; font-size:12px; line-height:1.3; }
-    .error-box.show { display:block; animation:fadeIn .3s ease; }
+  .error-box { display:none; background:#301b1b; border:1px solid #5e2727; color:#fca5a5; padding:10px 12px; border-radius:10px; font-size:12px; line-height:1.3; }
+  .error-box.show { display:block; animation:fadeIn .3s ease; }
+  .mode-switch { display:flex; gap:6px; margin-bottom:4px; }
+  .mode-switch button { font-weight:500; }
+  .field.valid input { border-color: #2e7d32; }
+  .field.invalid input { border-color: #c62828; }
+  .field-msg { font-size:11px; margin-top:2px; color:var(--muted); }
+  .field.invalid .field-msg { color:#ef5350; }
+  .field.valid .field-msg { color:#69e4a6; }
+  .pw-meter { display:none; width:100%; height:6px; background:var(--wa-panel); border-radius:4px; position:relative; overflow:hidden; margin-top:-4px; }
+  .pw-meter-bar { position:absolute; top:0; left:0; height:100%; width:0%; background:linear-gradient(90deg,#ef5350,#ffca28,#69e4a6); transition:width .25s ease; }
+  .pw-meter-label { font-size:11px; margin-top:4px; opacity:.75; }
+  .btn.loading { position:relative; }
+  .btn.loading .spinner { width:14px; height:14px; border:2px solid rgba(255,255,255,.4); border-top-color:#fff; border-radius:50%; display:inline-block; animation:spin .6s linear infinite; margin-right:6px; }
+  @keyframes spin {to{transform:rotate(360deg)}}
+  #theme-toggle { position:absolute; top:10px; right:12px; background:transparent; border:0; color:var(--muted); cursor:pointer; font-size:18px; line-height:1; opacity:.7; transition:opacity .2s,transform .2s }
+  #theme-toggle:hover,#theme-toggle:focus-visible{opacity:1;transform:scale(1.06)}
     .help-text { font-size:12px; color:var(--muted); margin-top:-4px; }
     .btn[disabled] { opacity:.6; cursor:not-allowed; }
     .footer-note { margin-top:32px; text-align:center; font-size:11px; color:var(--muted); opacity:.65; }
@@ -55,17 +70,14 @@
   </div></header>
   <main class="login-wrapper">
     <div class="card login-card" aria-labelledby="login-title">
-  <div style="display:flex;gap:8px;justify-content:center;margin-bottom:12px;" role="tablist">
-    <button type="button" class="tab-btn" id="tab-login" role="tab" aria-selected="true">Entrar</button>
-    <button type="button" class="tab-btn" id="tab-register" role="tab" aria-selected="false">Criar conta</button>
-  </div>
-  <p id="login-title" style="margin:0 0 14px; font-size:13px; opacity:.82; text-align:center">Acesse o console para gerenciar sua sessão WhatsApp.</p>
-      <div class="error-box" id="err-box" role="alert"></div>
-      <form id="login-form" autocomplete="on" data-mode="login">
-        <div class="field">
-          <label for="name">Nome</label>
-          <input id="name" type="text" placeholder="Seu nome" autocomplete="name" class="input" />
-        </div>
+  <button id="theme-toggle" type="button" aria-label="Alternar tema"></button>
+  <p id="login-title" style="margin:0 0 14px; font-size:14px; opacity:.9; text-align:center;font-weight:500">Acesse sua conta ou crie uma nova.</p>
+      <div class="error-box" id="err-box" role="alert" aria-hidden="true"></div>
+      <div class="mode-switch" role="tablist" aria-label="Alternar modo">
+        <button type="button" class="tab-btn" data-mode-tab="login" role="tab" aria-selected="true">Entrar</button>
+        <button type="button" class="tab-btn" data-mode-tab="register" role="tab" aria-selected="false">Criar conta</button>
+      </div>
+      <form id="login-form" autocomplete="on" data-mode="login" novalidate>
         <div class="field">
           <label for="email">Email</label>
           <input id="email" type="email" placeholder="voce@empresa.com" autocomplete="email" class="input" required />
@@ -77,14 +89,24 @@
             <input id="password" type="password" inputmode="numeric" placeholder="••••" class="input" required aria-describedby="pass-help" />
             <button type="button" class="toggle-pass" id="btn-pass" aria-label="Mostrar senha">👁</button>
           </div>
-          <div class="help-text" id="pass-help">Mínimo 4 caracteres (mock).</div>
-        </div>
-        <div class="field" id="confirm-wrap" style="display:none;">
-          <label for="password2">Confirmar senha</label>
-          <div class="pass-wrap">
-            <input id="password2" type="password" placeholder="Repetir senha" class="input" aria-describedby="confirm-help" />
+          <div class="help-text" id="pass-help">Mínimo 6 caracteres.</div>
+          <div class="pw-meter" id="pw-meter" aria-hidden="true">
+            <div class="pw-meter-bar" id="pw-meter-fill"></div>
           </div>
-          <div class="help-text" id="confirm-help">Repita a senha para confirmar.</div>
+          <div class="pw-meter-label" id="pw-meter-label" aria-live="polite"></div>
+        </div>
+        <div id="register-extra" style="display:none;flex-direction:column;gap:16px;">
+          <div class="field">
+            <label for="reg-name">Nome</label>
+            <input id="reg-name" type="text" placeholder="Seu nome" autocomplete="name" class="input" />
+          </div>
+          <div class="field" id="confirm-wrap">
+            <label for="password2">Confirmar senha</label>
+            <div class="pass-wrap">
+              <input id="password2" type="password" placeholder="Repetir senha" class="input" aria-describedby="confirm-help" />
+            </div>
+            <div class="help-text" id="confirm-help">Repita a senha para confirmar.</div>
+          </div>
         </div>
         <!-- Campos de workspace e captcha removidos -->
         <div class="field inline">
@@ -92,93 +114,14 @@
           <label for="remember" style="margin:0;font-size:12px;cursor:pointer;">Lembrar-me</label>
         </div>
   <button class="btn" id="btn-login" type="submit">Entrar</button>
-        <div class="muted-link"><a href="#" onclick="alert('Recuperação de senha em breve');return false;">Esqueci a senha</a></div>
+        <div class="muted-link" style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+          <a href="#" onclick="alert('Recuperação de senha em breve');return false;">Esqueci a senha</a>
+          <span style="opacity:.6;font-size:11px;">Suporte em breve</span>
+        </div>
       </form>
   <div class="footer-note">ZapSan • Versão demonstrativa • Credenciais não persistem</div>
     </div>
   </main>
-  <script>
-    (function(){
-  const form = document.getElementById('login-form');
-  const email = document.getElementById('email');
-  const pass = document.getElementById('password');
-  const pass2 = document.getElementById('password2');
-  const remember = document.getElementById('remember');
-  const errBox = document.getElementById('err-box');
-  const btn = document.getElementById('btn-login');
-  const passToggle = document.getElementById('btn-pass');
-  const confirmWrap = document.getElementById('confirm-wrap');
-  const tabLogin = document.getElementById('tab-login');
-  const tabRegister = document.getElementById('tab-register');
-    // Tema toggle ícone (persistência simples)
-    const themeBtn = document.createElement('button');
-    themeBtn.className='theme-toggle';
-    themeBtn.type='button';
-    themeBtn.setAttribute('aria-label','Alternar tema');
-    document.body.appendChild(themeBtn);
-    function applyTheme(t){ document.documentElement.dataset.theme = t; localStorage.setItem('theme',t);} 
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    applyTheme(savedTheme);
-    function updateThemeIcon(){ themeBtn.textContent = document.documentElement.dataset.theme==='light' ? '🌙' : '☀️'; }
-    updateThemeIcon();
-    themeBtn.onclick=()=>{ applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light'); updateThemeIcon(); };
-
-      // Toggle senha
-      passToggle?.addEventListener('click', ()=>{
-        if(pass.type==='password'){ pass.type='text'; passToggle.textContent='🙈'; passToggle.setAttribute('aria-label','Ocultar senha'); }
-        else { pass.type='password'; passToggle.textContent='👁'; passToggle.setAttribute('aria-label','Mostrar senha'); }
-      });
-
-      // Captcha removido
-
-      function showErr(msg){ if(!errBox)return; errBox.textContent=msg; errBox.classList.add('show'); }
-      function clearErr(){ if(!errBox)return; errBox.classList.remove('show'); errBox.textContent=''; }
-      function setLoading(v){ if(!btn)return; btn.disabled=v; btn.textContent = v? 'Entrando…':'Entrar'; }
-      function setMode(mode){
-        form.setAttribute('data-mode', mode);
-        const isReg = mode==='register';
-        confirmWrap.style.display = isReg ? 'block' : 'none';
-        tabLogin.setAttribute('aria-selected', String(!isReg));
-        tabRegister.setAttribute('aria-selected', String(isReg));
-        btn.textContent = isReg ? 'Criar conta' : 'Entrar';
-      }
-      tabLogin?.addEventListener('click', ()=> setMode('login'));
-      tabRegister?.addEventListener('click', ()=> setMode('register'));
-
-      form?.addEventListener('submit', async (e)=>{
-        e.preventDefault();
-        const mode = form.getAttribute('data-mode')||'login';
-        const em=(email.value||'').trim();
-        const pw=(pass.value||'').trim();
-        const pwc=(pass2?.value||'').trim();
-        clearErr();
-        if(!em||!pw){ showErr('Preencha os campos obrigatórios.'); return; }
-        if(pw.length < 4){ showErr('Senha mínima de 4 caracteres.'); return; }
-        if(mode==='register'){
-          if(!pwc){ showErr('Confirme a senha.'); return; }
-            if(pw !== pwc){ showErr('As senhas não coincidem.'); return; }
-        }
-        try {
-          setLoading(true);
-          const nameEl = document.getElementById('name')
-          const name = nameEl && nameEl.value ? nameEl.value.trim() : ''
-          const payload = { email: em, password: pw }
-          if(name) payload.name = name
-          let endpoint = '/auth/login'
-          if(mode==='register'){ endpoint = '/auth/register'; payload.confirm = pwc }
-          const r = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
-          if(!r.ok){ const j=await r.json().catch(()=>({})); showErr('Falha '+(mode==='register'?'registro':'login')+': '+(j.error||r.status)); setLoading(false); return }
-          const j = await r.json();
-          localStorage.setItem('auth','ok');
-          localStorage.setItem('sessionId', j.sessionId);
-          localStorage.setItem('userId', j.userId);
-          if(remember?.checked) localStorage.setItem('remember','1');
-          location.replace('/');
-        } catch(err){ showErr('Erro de rede, tente novamente.'); }
-        finally { setLoading(false); }
-      });
-      try { if (localStorage.getItem('auth') === 'ok') { location.replace('/'); } } catch {}
-    })();
-  </script>
+  <script src="/login.js" defer></script>
 </body>
 </html>
