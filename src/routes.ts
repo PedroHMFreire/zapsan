@@ -15,6 +15,7 @@ import os from 'os'
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
 import { getOrCreateUserSession, ensureSessionStarted } from './userSessions'
 import { recordMessage, checkQuota, getUsage, getPlan } from './usage'
+import { prisma } from './db'
 
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -260,6 +261,96 @@ r.get('/sessions/:id/qr', async (req: Request, res: Response) => {
     return res.json({ dataUrl: qr })
   } catch (err: any) {
     return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// === DB-backed endpoints (Prisma) ===
+// Upsert básico de usuário por phone (unique). Body: { phone, name? }
+r.post('/users', async (req: Request, res: Response) => {
+  try {
+    const phone = String(req.body?.phone||'').trim()
+    const name = req.body?.name ? String(req.body.name).trim() : undefined
+    if(!phone) return res.status(400).json({ error: 'missing_phone' })
+    // Upsert: se existir atualiza name (quando fornecido), senão cria
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: name ? { name } : {},
+      create: { phone, name }
+    })
+    res.status(201).json({ ok:true, user })
+  } catch(err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Lista sessões associadas a um usuário (id do model User, não sessionId lógico)
+r.get('/users/:id/sessions', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    if(!id) return res.status(400).json({ error: 'missing_id' })
+    const sessions = await prisma.session.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' } })
+    res.json({ sessions })
+  } catch(err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Mensagens persistidas no Postgres (paginação por cursor temporal decrescente)
+// Query params: limit (default 50, max 200), before (timestamp ISO ou epoch ms) para paginação
+r.get('/sessions/:id/messages/db', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params // id aqui é session.sessionId lógico
+    const limitRaw = Number(req.query.limit || 50)
+    const limit = isNaN(limitRaw) ? 50 : Math.min(Math.max(limitRaw, 1), 200)
+    const beforeRaw = String(req.query.before||'').trim()
+    let beforeDate: Date | undefined
+    if(beforeRaw){
+      // tenta parse epoch
+      const asNum = Number(beforeRaw)
+      if(!isNaN(asNum) && asNum > 0){
+        beforeDate = new Date(asNum)
+      } else {
+        const d = new Date(beforeRaw)
+        if(!isNaN(d.getTime())) beforeDate = d
+      }
+    }
+    // Recupera Session.id interno a partir de sessionId lógico
+    const session = await prisma.session.findUnique({ where: { sessionId: id }, select: { id: true } })
+    if(!session) return res.status(404).json({ error: 'session_not_found' })
+    const where: any = { sessionId: session.id }
+    if(beforeDate){
+      where.timestamp = { lt: beforeDate }
+    }
+    const messages = await prisma.message.findMany({
+      where,
+      orderBy: { timestamp: 'desc' },
+      take: limit,
+    })
+    // Próximo cursor é o menor timestamp retornado (para continuar paginação)
+    let nextCursor: string | null = null
+    if(messages.length === limit){
+      const last = messages[messages.length - 1]
+      nextCursor = last.timestamp.toISOString()
+    }
+    res.json({ messages, nextCursor, pageSize: messages.length })
+  } catch(err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Lista contatos de uma sessão persistidos
+r.get('/sessions/:id/contacts', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params // sessionId lógico
+    const session = await prisma.session.findUnique({ where: { sessionId: id }, select: { id: true } })
+    if(!session) return res.status(404).json({ error: 'session_not_found' })
+    const contacts = await prisma.contact.findMany({
+      where: { sessionId: session.id },
+      orderBy: [ { name: 'asc' }, { jid: 'asc' } ]
+    })
+    res.json({ contacts })
+  } catch(err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
