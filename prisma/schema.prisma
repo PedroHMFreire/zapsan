@@ -1,0 +1,57 @@
+// Prisma schema generated per user request
+// Ajuste provider/url conforme necessário.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String    @id @default(uuid())
+  phone     String    @unique
+  name      String?
+  sessions  Session[]
+  createdAt DateTime  @default(now())
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  sessionId String    @unique
+  status    String
+  user      User?     @relation(fields: [userId], references: [id])
+  userId    String?
+  contacts  Contact[]
+  messages  Message[]
+  createdAt DateTime  @default(now())
+}
+
+model Contact {
+  id         String    @id @default(uuid())
+  session    Session   @relation(fields: [sessionId], references: [id])
+  sessionId  String
+  jid        String
+  name       String?
+  isGroup    Boolean   @default(false)
+  updatedAt  DateTime  @updatedAt
+
+  @@index([sessionId, jid])
+}
+
+model Message {
+  id         String    @id @default(uuid())
+  session    Session   @relation(fields: [sessionId], references: [id])
+  sessionId  String
+  jid        String
+  waMsgId    String?   // m.key.id
+  fromMe     Boolean   @default(false)
+  body       String?
+  timestamp  DateTime
+  raw        Json?
+  createdAt  DateTime  @default(now())
+
+  @@index([sessionId, jid, timestamp])
+}
