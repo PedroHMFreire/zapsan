@@ -23,8 +23,45 @@ import https from 'https'
 import { EventEmitter } from 'events'
 
 // Mantém comportamento antigo: pasta local "sessions".
-// Se quiser, pode definir SESS_DIR no Render sem quebrar local.
+// Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
 const SESS_DIR = process.env.SESS_DIR || path.resolve(process.cwd(), 'sessions')
+// Garante existência imediata do diretório raiz e reporta (útil para diagnosticar ENOENT / read-only FS)
+try {
+  fs.mkdirSync(SESS_DIR, { recursive: true })
+  // Log somente uma vez no boot
+  // (console.log usado em vez de logger interno para aparecer cedo no Render)
+  // eslint-disable-next-line no-console
+  console.log('[wa][init] SESS_DIR', SESS_DIR)
+} catch (err:any) {
+  // eslint-disable-next-line no-console
+  console.error('[wa][init][error_mkdir]', SESS_DIR, err?.message)
+}
+
+// Wrapper com retry para lidar com condição rara de ENOENT em init auth state (FS lento ou remoção concorrente)
+async function prepareAuthState(baseDir:string){
+  let lastErr:any
+  for(let attempt=1; attempt<=3; attempt++){
+    try {
+      ensureDir(baseDir)
+      const r = await useMultiFileAuthState(baseDir)
+      if(attempt>1){
+        // eslint-disable-next-line no-console
+        console.warn('[wa][authstate][recovered]', { baseDir, attempt })
+      }
+      return r
+    } catch(err:any){
+      lastErr = err
+      if(err?.code === 'ENOENT'){
+        // eslint-disable-next-line no-console
+        console.warn('[wa][authstate][retry]', { baseDir, attempt, code: err.code })
+        await new Promise(r=>setTimeout(r, 50*attempt))
+        continue
+      }
+      break
+    }
+  }
+  throw lastErr
+}
 
 type Sess = {
   sock?: WASocket
@@ -127,8 +164,9 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
   sessionState.set(sessionId, 'connecting')
 
   const boot = async () => {
-    const sess = sessions.get(sessionId)!
-    const { state, saveCreds } = await useMultiFileAuthState(baseDir)
+  const sess = sessions.get(sessionId)!
+  // Usa wrapper resiliente para reduzir risco de ENOENT inicial (principalmente em FS em rede ou após nukeDir simultâneo)
+  const { state, saveCreds } = await prepareAuthState(baseDir)
 
     // >>> Correção 1: usar sempre a versão correta do WhatsApp Web
     const { version } = await fetchLatestBaileysVersion()
