@@ -1,14 +1,19 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
-import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages, sendMedia } from './wa'
+import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages as getMessagesNew, sendMedia, getAllSessionMeta, cleanLogout, createIdleSession, nukeAllSessions, getSessionStatus, onMessageStream } from './wa'
+import { authenticate, upsertUserIfMissing, findUser, createUser } from './users'
 import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
 import { queryMessages } from './messageStore'
 import { search } from './searchIndex'
 import { sseHandler } from './realtime'
+import { canCreateSession, takeSendToken, snapshotRateState } from './rateLimit'
+import os from 'os'
 // fs/path já importados acima
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
+import { getOrCreateUserSession, ensureSessionStarted } from './userSessions'
+import { recordMessage, checkQuota, getUsage, getPlan } from './usage'
 
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -37,9 +42,20 @@ function scheduleDispatch(s: Schedule) {
   if (delay <= 0) return // past; will be handled manually if desired
   setTimeout(async () => {
     try {
-      await createOrLoadSession(s.session_id)
-      await sendText(s.session_id, s.to, s.text)
-      s.status = 'sent'
+      const manual = process.env.MANUAL_PAIRING === '1'
+      if(manual){
+        const st = getStatus(s.session_id)
+        if(st.state !== 'open') {
+          s.status = 'failed'
+        } else {
+          await sendText(s.session_id, s.to, s.text)
+          s.status = 'sent'
+        }
+      } else {
+        await createOrLoadSession(s.session_id)
+        await sendText(s.session_id, s.to, s.text)
+        s.status = 'sent'
+      }
     } catch {
       s.status = 'failed'
     } finally {
@@ -54,11 +70,78 @@ schedules.filter(s => s.status === 'pending').forEach(scheduleDispatch)
 // import { actualExportedName as createOrLoadSession, getQR, sendText } from './wa'
 
 const r = Router()
+
+// === Auth & sessão por usuário ===
+// /auth/register: cria novo usuário; /auth/login: apenas autentica (sem auto-criação) ou aceita legacy { user }
+
+r.post('/auth/register', (req: Request, res: Response) => {
+  try {
+    const name = String(req.body?.name||'').trim()
+    const emailRaw = String(req.body?.email||'').trim().toLowerCase()
+    const password = String(req.body?.password||'')
+    const confirm = String(req.body?.confirm||'')
+    if(!emailRaw || !password) return res.status(400).json({ error: 'missing_fields' })
+    if(password.length < 4) return res.status(400).json({ error: 'weak_password' })
+    if(password !== confirm) return res.status(400).json({ error: 'password_mismatch' })
+    if(findUser(emailRaw)) return res.status(409).json({ error: 'user_exists' })
+    const u = createUser(name, emailRaw, password)
+    const sessionId = getOrCreateUserSession(u.id)
+    res.cookie('uid', u.id, { httpOnly: false })
+    res.status(201).json({ ok:true, userId: u.id, sessionId, created:true })
+  } catch(err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+r.post('/auth/login', (req: Request, res: Response) => {
+  try {
+    const legacyUser = String(req.body?.user||'').trim()
+    const emailRaw = String(req.body?.email||'').trim().toLowerCase()
+    const password = String(req.body?.password||'')
+    let userId = ''
+    if(emailRaw){
+      if(!findUser(emailRaw)) return res.status(404).json({ error: 'user_not_found' })
+      const ok = authenticate(emailRaw, password)
+      if(!ok) return res.status(401).json({ error: 'invalid_credentials' })
+      userId = emailRaw
+    } else if(legacyUser){
+      userId = legacyUser
+    } else {
+      return res.status(400).json({ error: 'missing_credentials' })
+    }
+    const sessionId = getOrCreateUserSession(userId)
+    res.cookie('uid', userId, { httpOnly: false })
+    res.json({ ok:true, userId, sessionId })
+  } catch(err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Retorna a sessão do usuário logado (por cookie ou query user)
+r.get('/me/session', (req: Request, res: Response) => {
+  try {
+    const uid = (req.cookies?.uid) || String(req.query.user||'')
+    if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+    const sessionId = getOrCreateUserSession(uid)
+    res.json({ userId: uid, sessionId })
+  } catch (err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
 const upload = multer({ dest: path.join(process.cwd(), 'data', 'uploads') })
 
 // Saúde do serviço
 r.get('/health', (_req: Request, res: Response) => {
   res.json({ ok: true, uptime: process.uptime() })
+})
+
+// Apaga todas as sessões (requer query confirm=1)
+r.delete('/sessions', (req: Request, res: Response) => {
+  if(String(req.query.confirm||'') !== '1'){
+    return res.status(400).json({ error: 'confirmation_required', message: 'Use ?confirm=1 para confirmar exclusão de todas as sessões.' })
+  }
+  const out = nukeAllSessions() // já contém ok:true
+  res.json({ ...out, wiped:true })
 })
 
 // Debug sessão
@@ -102,10 +185,56 @@ r.post('/sessions/create', async (req: Request, res: Response) => {
     if (!sessionId) {
       return res.status(400).json({ error: 'bad_request', message: 'session_id obrigatório' })
     }
-    // dispara criação sem bloquear resposta
-    createOrLoadSession(sessionId).catch(() => {})
-    return res.status(202).json({ ok: true, status: 'creating' })
+    // throttle per IP & global
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
+    const allowed = canCreateSession(ip)
+    if(!allowed.ok){
+      return res.status(429).json({ error: 'rate_limited', scope: allowed.reason })
+    }
+    const manual = process.env.MANUAL_PAIRING === '1'
+    if(manual){
+      createIdleSession(sessionId)
+      return res.status(201).json({ ok:true, status: 'idle', manual:true })
+    } else {
+      createOrLoadSession(sessionId).catch(() => {})
+      return res.status(202).json({ ok: true, status: 'creating', manual:false })
+    }
   } catch (err: any) {
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Inicia pairing manualmente (gera socket e QR)
+r.post('/sessions/:id/start', async (req: Request, res: Response) => {
+  try {
+    if(process.env.MANUAL_PAIRING !== '1') return res.status(400).json({ error: 'not_manual_mode' })
+    const { id } = req.params
+    const info = getDebug(id)
+    if(!info.exists) createIdleSession(id)
+    if(info.state && ['pairing','open'].includes(info.state)) return res.status(409).json({ error: 'already_active', state: info.state })
+  await createOrLoadSession(id)
+    return res.json({ ok:true, started:true })
+  } catch (err:any){
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Regenera QR (reinicia socket se necessário) respeitando grace
+r.post('/sessions/:id/qr/regenerate', async (req: Request, res: Response) => {
+  try {
+    if(process.env.MANUAL_PAIRING !== '1') return res.status(400).json({ error: 'not_manual_mode' })
+    const { id } = req.params
+    const force = String(req.query.force||'') === '1'
+    const dbg = getDebug(id)
+    if(!dbg.exists) return res.status(404).json({ error: 'not_found' })
+    if(dbg.state === 'open') return res.status(400).json({ error: 'already_open' })
+    if(dbg.scanGraceRemaining && dbg.scanGraceRemaining > 0 && !force){
+      return res.status(429).json({ error: 'grace_active', remaining: dbg.scanGraceRemaining })
+    }
+    // reinicia para forçar novo QR
+  await createOrLoadSession(id)
+    return res.json({ ok:true, regenerating:true })
+  } catch (err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
@@ -125,12 +254,30 @@ r.get('/sessions/:id/qr', async (req: Request, res: Response) => {
 // Enviar texto via WhatsApp
 r.post('/messages/send', async (req: Request, res: Response) => {
   try {
-    const { session_id, to, text } = req.body || {}
-    if (!session_id || !to || !text) {
-      return res.status(400).json({ error: 'bad_request', message: 'session_id, to e text são obrigatórios' })
+    const { to, text } = req.body || {}
+    const userId = (req.cookies?.uid) || String(req.body?.user||'')
+    if(!userId) return res.status(401).json({ error: 'unauthenticated' })
+    if (!to || !text) {
+      return res.status(400).json({ error: 'bad_request', message: 'to e text são obrigatórios' })
     }
-    await createOrLoadSession(String(session_id))
+    const session_id = getOrCreateUserSession(userId)
+    const quota = checkQuota(userId, session_id)
+    if(!quota.ok){
+      return res.status(429).json({ error: 'quota_exceeded', remaining: 0, plan: quota.plan })
+    }
+    const token = takeSendToken(String(session_id))
+    if(!token.ok){
+      return res.status(429).json({ error: 'rate_limited', message: 'Limite de envio atingido. Aguarde.', remaining: token.remaining })
+    }
+    const manual = process.env.MANUAL_PAIRING === '1'
+    if(manual){
+      const st = getStatus(String(session_id))
+      if(st.state !== 'open'){ return res.status(409).json({ error: 'not_open', state: st.state }) }
+    } else {
+      await createOrLoadSession(String(session_id))
+    }
     await sendText(String(session_id), String(to), String(text))
+    recordMessage(session_id)
     return res.json({ ok: true })
   } catch (err: any) {
     const code = err?.message === 'session_not_found' ? 404 : 500
@@ -138,12 +285,79 @@ r.post('/messages/send', async (req: Request, res: Response) => {
   }
 })
 
+// === Perfil & sessão do usuário ===
+r.get('/me', (req: Request, res: Response) => {
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  const sessionId = getOrCreateUserSession(uid)
+  res.json({ userId: uid, sessionId })
+})
+
+r.get('/me/profile', (req: Request, res: Response) => {
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  const sessionId = getOrCreateUserSession(uid)
+  const plan = getPlan(uid)
+  const usage = getUsage(sessionId)
+  const status = getSessionStatus(sessionId)
+  res.json({ userId: uid, sessionId, plan, usage, session: status })
+})
+
+r.post('/me/logout', (req: Request, res: Response) => {
+  res.clearCookie('uid')
+  try { localStorageClearHint(res) } catch {}
+  res.json({ ok:true })
+})
+
+// Proxy de QR da sessão do usuário
+r.get('/me/session/qr', (req: Request, res: Response) => {
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  const sessionId = getOrCreateUserSession(uid)
+  const qr = getQR(sessionId)
+  if(!qr) return res.status(404).json({ error: 'not_ready' })
+  res.json({ dataUrl: qr })
+})
+
+r.post('/me/session/regen-qr', async (req: Request, res: Response) => {
+  if(process.env.MANUAL_PAIRING !== '1') return res.status(400).json({ error: 'not_manual_mode' })
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  const sessionId = getOrCreateUserSession(uid)
+  try { await createOrLoadSession(sessionId) } catch {}
+  res.json({ ok:true, regenerating:true })
+})
+
+r.post('/me/session/clean', async (req: Request, res: Response) => {
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  const sessionId = getOrCreateUserSession(uid)
+  const out = await cleanLogout(sessionId, { keepMessages: true })
+  if(!out.ok) return res.status(404).json({ error: out.reason||'not_found' })
+  res.json({ ok:true, cleaned:true })
+})
+
+function localStorageClearHint(res: Response){
+  // placeholder: em ambientes reais podemos instruir o frontend a limpar storage
+  res.setHeader('X-Client-Clear-Storage','1')
+}
+
 // Enviar mídia via upload multipart
 r.post('/messages/media', upload.single('file'), async (req: Request, res: Response) => {
   try {
     const { session_id, to, caption } = req.body || {}
     if (!session_id || !to || !req.file) return res.status(400).json({ error: 'bad_request', message: 'session_id, to e file são obrigatórios' })
-    await createOrLoadSession(String(session_id))
+    const token = takeSendToken(String(session_id))
+    if(!token.ok){
+      return res.status(429).json({ error: 'rate_limited', message: 'Limite de envio atingido. Aguarde.', remaining: token.remaining })
+    }
+    const manual = process.env.MANUAL_PAIRING === '1'
+    if(manual){
+      const st = getStatus(String(session_id))
+      if(st.state !== 'open'){ return res.status(409).json({ error: 'not_open', state: st.state }) }
+    } else {
+      await createOrLoadSession(String(session_id))
+    }
     await sendMedia(String(session_id), String(to), req.file.path, { caption })
     return res.json({ ok: true })
   } catch (err: any) {
@@ -156,10 +370,50 @@ r.post('/messages/media', upload.single('file'), async (req: Request, res: Respo
 r.get('/sessions/:id/status', (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const status = getStatus(id)
-    return res.json(status)
-  } catch (err: any) {
+    return res.json(getSessionStatus(id))
+  } catch (err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Metrics endpoint (JSON)
+r.get('/metrics', (_req: Request, res: Response) => {
+  try {
+    const meta = getAllSessionMeta()
+    const rates = snapshotRateState()
+    res.json({ time: Date.now(), host: os.hostname(), sessions: meta, rates })
+  } catch (err: any) {
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Força reset da sessão (apaga diretório de credenciais) e reinicia -> novo QR
+r.post('/sessions/:id/reset', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const sessDirRoot = process.env.SESS_DIR || path.resolve(process.cwd(), 'sessions')
+    const baseDir = path.join(sessDirRoot, id)
+    // apagar diretório se existir
+    try { fs.rmSync(baseDir, { recursive: true, force: true }) } catch {}
+    // pequena espera opcional para garantir flush
+    await new Promise(r=>setTimeout(r, 50))
+    createOrLoadSession(id).catch(()=>{})
+    res.json({ ok:true, resetting:true })
+  } catch (err: any) {
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Limpa sessão (logout e remove credenciais). Se keep=1 preserva mensagens em memória
+r.post('/sessions/:id/clean', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const keep = String(req.query.keep||'') === '1'
+    const out = await cleanLogout(id, { keepMessages: keep })
+    if(!out.ok) return res.status(404).json({ error: out.reason || 'not_found' })
+    res.json({ ok: true, cleaned: true, keptMessages: keep })
+  } catch (err: any) {
+    res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
@@ -167,15 +421,12 @@ r.get('/sessions/:id/status', (req: Request, res: Response) => {
 r.get('/sessions/:id/messages', (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const limit = Number(req.query.limit || 100)
-    const before = req.query.before ? Number(req.query.before) : undefined
-    const after = req.query.after ? Number(req.query.after) : undefined
-    const from = req.query.from ? String(req.query.from) : undefined
-    const direction = req.query.direction === 'in' || req.query.direction === 'out' ? req.query.direction : undefined
-    const search = req.query.search ? String(req.query.search) : undefined
-    const msgs = queryMessages(id, { limit, before, after, from, direction: direction as any, search })
+    const limitRaw = Number(req.query.limit || 200)
+    const limit = isNaN(limitRaw) ? 200 : Math.min(Math.max(limitRaw, 1), 1000)
+    // Novo buffer já retorna ordenado por timestamp asc (assumido). Caso contrário ordenar aqui.
+    const msgs = getMessagesNew(id, limit)
     return res.json({ messages: msgs })
-  } catch (err: any) {
+  } catch (err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
@@ -195,7 +446,33 @@ r.get('/sessions/:id/search', (req: Request, res: Response) => {
 
 // SSE stream em tempo real
 r.get('/sessions/:id/stream', (req: Request, res: Response) => {
-  sseHandler(req, res)
+  const { id } = req.params
+  // Configuração de cabeçalhos SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  })
+  res.write(':ok\n\n')
+  // Envia estado inicial
+  try {
+    const state = getSessionStatus(id)
+    res.write(`event: status\n`)
+    res.write(`data: ${JSON.stringify(state)}\n\n`)
+    const recent = getMessagesNew(id, 50)
+    res.write(`event: recent\n`)
+    res.write(`data: ${JSON.stringify(recent)}\n\n`)
+  } catch {}
+  let closed = false
+  const unsub = onMessageStream(id, (m) => {
+    if (closed) return
+    try {
+      res.write(`event: message\n`)
+      res.write(`data: ${JSON.stringify(m)}\n\n`)
+    } catch {}
+  })
+  req.on('close', () => { closed = true; try { unsub() } catch {} })
 })
 
 export default r
@@ -279,4 +556,13 @@ r.delete('/tags/:id', (req: Request, res: Response) => {
   delete tags[id]
   writeJson('tags.json', tags)
   res.json({ ok: true })
+})
+
+// === Debug: lista rotas disponíveis (somente em dev) ===
+r.get('/debug/routes', (_req: Request, res: Response) => {
+  const stack: any[] = (r as any).stack || []
+  const routes = stack
+    .filter(l => l.route && l.route.path)
+    .map(l => ({ method: Object.keys(l.route.methods)[0].toUpperCase(), path: l.route.path }))
+  res.json({ routes })
 })

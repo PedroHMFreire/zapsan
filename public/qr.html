@@ -16,12 +16,15 @@
         <span class="step active" style="padding:4px 8px;border-radius:999px;background:rgba(105,228,166,.15);color:var(--brand);font-weight:600;">2. QR</span>
         <span class="step" style="opacity:.6;">3. Conectado</span>
       </div>
-      <div id="qrSkeleton" class="skeleton" style="width:100%;max-width:320px;height:320px;margin:0 auto;border-radius:12px;"></div>
+      <div id="qrSkeleton" class="skeleton" style="width:100%;max-width:320px;height:320px;margin:0 auto;border-radius:12px;position:relative;overflow:hidden"></div>
       <img id="qrimg" alt="QR" style="width: 320px; max-width: 100%; border-radius: 12px; background:#fff; display:none" />
       <p id="hint" style="margin-top:8px; font-size:14px; opacity:.85">Abra o WhatsApp > Conectar um dispositivo</p>
       <p id="status" style="margin-top:4px; font-size:14px; opacity:.85"></p>
       <p id="status-note" class="muted" style="margin-top:4px;"></p>
-      <a href="/" class="btn secondary" style="display:inline-block;margin-top:8px">Voltar</a>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap">
+        <button id="btn-reset" class="btn secondary" type="button">Resetar sessão</button>
+        <a href="/" class="btn secondary">Voltar</a>
+      </div>
     </div>
   </div>
   <script>
@@ -40,6 +43,7 @@
     const statusEl = document.getElementById('status');
     const note = document.getElementById('status-note');
 
+    let lastQRChangeAt = 0;
     async function pollQR() {
       if (!id) return;
       try {
@@ -47,7 +51,10 @@
         if (r.ok) {
           const { dataUrl } = await r.json();
           if (dataUrl && img) {
-            img.src = dataUrl;
+            if(img.src !== dataUrl){
+              img.src = dataUrl;
+              lastQRChangeAt = Date.now();
+            }
             if(skel) skel.style.display='none';
             img.style.display='block';
           }
@@ -74,10 +81,36 @@
           setTimeout(() => {
             location.href = `/chat.html?session_id=${encodeURIComponent(id)}`;
           }, 1200);
+        } else if(s.state === 'restarting' || s.state === 'reconnecting') {
+          statusEl.textContent = 'Reconectando...';
+        }
+        // QR estagnado? sugere reset após 60s
+        if(!redirected && lastQRChangeAt && Date.now()-lastQRChangeAt > 60_000){
+          statusEl.textContent = 'QR pode ter expirado. Clique em Resetar sessão.';
         }
       } catch {}
     }
 
+    // Auto-start session if user opened page directly with ?session_id without calling create
+    async function ensureSessionStarted(){
+      if(!id) return;
+      try {
+        // dispara criação sem incomodar se já existir
+        await fetch('/sessions/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:id})});
+      } catch {}
+    }
+
+    // Reset button
+    document.getElementById('btn-reset')?.addEventListener('click', async ()=>{
+      if(!id) return;
+      try {
+        const r=await fetch(`/sessions/${encodeURIComponent(id)}/reset`,{method:'POST'});
+        if(r.ok){ toast('Reset solicitado'); img.style.display='none'; if(skel) skel.style.display='block'; lastQRChangeAt=0; }
+        else toast('Falha ao resetar','err');
+      } catch { toast('Erro rede reset','err'); }
+    });
+
+    ensureSessionStarted();
     setInterval(pollQR, 3000);
     setInterval(pollStatus, 2000);
     pollQR();

@@ -19,6 +19,7 @@
     <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
       <button type="button" class="m-btn" id="theme-toggle" aria-label="Alternar tema">🌙</button>
       <div class="badge" id="svc-badge">Carregando…</div>
+      <button type="button" class="m-btn" id="profile-btn" aria-haspopup="dialog" title="Perfil">👤</button>
     </div>
   </div></header>
 
@@ -59,6 +60,39 @@
   <button type="submit" class="btn" id="send" aria-label="Enviar mensagem">Enviar</button>
     </form>
     </section>
+  </div>
+
+  <!-- Modal Perfil -->
+  <div class="modal" id="mdl-profile" style="display:none">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+      <div class="modal-head">
+        <h3 id="profile-title" style="margin:0">Perfil</h3>
+        <button class="icon-btn" data-close-profile aria-label="Fechar">✖</button>
+      </div>
+      <div class="modal-body" id="profile-body">
+        <div class="section">
+          <strong>Usuário:</strong> <span id="pf-user">—</span><br/>
+          <strong>Session ID:</strong> <span id="pf-session">—</span>
+        </div>
+        <div class="section">
+          <strong>Plano:</strong> <span id="pf-plan">—</span><br/>
+          <small>Uso diário: <span id="pf-usage-today">0</span>/<span id="pf-quota">0</span></small><br/>
+          <small>Total: <span id="pf-usage-total">0</span></small>
+        </div>
+        <div class="section">
+          <strong>Sessão WhatsApp:</strong> <span id="pf-state">—</span>
+          <div id="pf-qr-wrap" style="margin-top:6px;display:none"><img id="pf-qr" alt="QR" style="max-width:180px;border:1px solid #222;padding:4px;border-radius:4px"/></div>
+          <div class="row" style="gap:6px;margin-top:8px">
+            <button class="btn sm" id="btn-regen-qr" style="display:none">Regenerar QR</button>
+            <button class="btn sm" id="btn-clean" style="display:none">Desvincular</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <button class="btn outline" id="btn-logout">Logout</button>
+        <button class="btn" data-close-profile>Fechar</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -283,6 +317,72 @@
       renderChatList();
     }catch{}
   }
+
+  // ===== Perfil =====
+  const profileBtn=document.getElementById('profile-btn');
+  const mdlProfile=document.getElementById('mdl-profile');
+  const pfUser=document.getElementById('pf-user');
+  const pfSession=document.getElementById('pf-session');
+  const pfPlan=document.getElementById('pf-plan');
+  const pfUsageToday=document.getElementById('pf-usage-today');
+  const pfQuota=document.getElementById('pf-quota');
+  const pfUsageTotal=document.getElementById('pf-usage-total');
+  const pfState=document.getElementById('pf-state');
+  const pfQRWrap=document.getElementById('pf-qr-wrap');
+  const pfQR=document.getElementById('pf-qr');
+  const btnRegen=document.getElementById('btn-regen-qr');
+  const btnClean=document.getElementById('btn-clean');
+  const btnLogout=document.getElementById('btn-logout');
+
+  function showProfile(){ mdlProfile.style.display='flex'; loadProfile(); }
+  function hideProfile(){ mdlProfile.style.display='none'; }
+  mdlProfile?.addEventListener('click', (e)=>{ if(e.target===mdlProfile) hideProfile(); });
+  document.querySelectorAll('[data-close-profile]').forEach(b=>b.addEventListener('click', hideProfile));
+  profileBtn?.addEventListener('click', showProfile);
+
+  let qrPollTimer=null;
+  async function pollQR(sessionId){
+    clearTimeout(qrPollTimer);
+    try {
+      const r=await fetch('/me/session/qr');
+      if(r.ok){ const j=await r.json(); pfQR.src=j.dataUrl; pfQRWrap.style.display='block'; }
+      else if(r.status===404){ pfQRWrap.style.display='none'; }
+    }catch{}
+    qrPollTimer=setTimeout(()=>pollQR(sessionId), 6000);
+  }
+
+  async function loadProfile(){
+    try {
+      const r=await fetch('/me/profile');
+      if(!r.ok){ toast('Falha perfil','err'); return }
+      const j=await r.json();
+      pfUser.textContent=j.userId;
+      pfSession.textContent=j.sessionId;
+      pfPlan.textContent=j.plan?.name||'—';
+      pfUsageToday.textContent=j.usage?.messagesToday||0;
+      pfQuota.textContent=j.plan?.quotaDaily||0;
+      pfUsageTotal.textContent=j.usage?.total||0;
+      pfState.textContent=j.session?.state||'—';
+      const st=j.session?.state;
+      const manual = (window.MANUAL_PAIRING === '1');
+      btnRegen.style.display = manual && (st==='pairing' || st==='idle') ? 'inline-block':'none';
+      btnClean.style.display = 'inline-block';
+      if(st==='pairing'){ pollQR(j.sessionId) } else { pfQRWrap.style.display='none'; clearTimeout(qrPollTimer); }
+    } catch {}
+  }
+
+  btnRegen?.addEventListener('click', async ()=>{
+    btnRegen.disabled=true; try{ const r=await fetch('/me/session/regen-qr',{method:'POST'}); if(r.ok){ toast('Reiniciando sessão'); loadProfile(); } else toast('Erro regen','err'); } finally { btnRegen.disabled=false; }
+  });
+  btnClean?.addEventListener('click', async ()=>{
+    if(!confirm('Desvincular e limpar credenciais?')) return;
+    btnClean.disabled=true; try{ const r=await fetch('/me/session/clean',{method:'POST'}); if(r.ok){ toast('Sessão limpa'); loadProfile(); } else toast('Erro limpar','err'); } finally { btnClean.disabled=false; }
+  });
+  btnLogout?.addEventListener('click', async ()=>{
+    try { const r=await fetch('/me/logout',{method:'POST'}); } catch {}
+    try { localStorage.removeItem('auth'); localStorage.removeItem('sessionId'); localStorage.removeItem('userId'); } catch {}
+    location.replace('/login.html');
+  });
 
   // Attachment button behavior (placeholder)
   const attachBtn=document.getElementById('attach');

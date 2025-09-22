@@ -1,0 +1,5 @@
+
+> zapsan@1.0.0 dev
+> node --dns-result-order=ipv4first ./node_modules/.bin/tsx src/server.ts
+
+{"level":30,"time":1758570940469,"pid":7010,"hostname":"MacBook-Air-de-MacBook.local","msg":"ZapSan online em http://localhost:3000"}

@@ -77,6 +77,7 @@ npm start
 - `GET /sessions/:id/search?q=texto&limit=20` (busca índice invertido)
 - `GET /sessions/:id/stream` (SSE eventos: message, message_status)
 - `POST /messages/send` → `{ session_id, to, text }`
+- `GET /metrics` (snapshot JSON de métricas internas / rate limits)
 
 ## Configurar o bot
 Edite `config/bot.yaml` (perfil, regras, memória).
@@ -95,6 +96,10 @@ Pode usar variáveis no formato `${VAR}` que serão substituídas se existirem e
 | SAVE_MEDIA | Se =1, baixa mídias recebidas em `data/media/<session>` | 0 |
 | WEBHOOK_URL | URL (http/https) para POST em cada mensagem recebida | (vazio) |
 | ENABLE_SSE | Futuro controle (não obrigatório) para ligar/desligar SSE | (não usado) |
+| SESSION_CREATE_PER_MIN | Limite de criação de sessões por IP/minuto | 5 |
+| SESSION_CREATE_GLOBAL_PER_MIN | Limite global criação sessões/minuto | 30 |
+| SEND_REFILL_RATE | Tokens reabastecidos por segundo por sessão (envio) | 1 |
+| SEND_BUCKET_CAP | Capacidade máxima do burst de envio | 20 |
 
 ## Estrutura principal
 | Caminho | Função |
@@ -112,6 +117,31 @@ Pode usar variáveis no formato `${VAR}` que serão substituídas se existirem e
 3. Mensagem não envia: formato do número deve terminar com `@s.whatsapp.net` e a sessão deve estar conectada.
 4. IA sempre mesma resposta: provavelmente sem `OPENAI_API_KEY`, está usando fallback local.
 5. Erro de modelo: troque `OPENAI_MODEL` para um modelo válido que sua conta suporta.
+
+## Observabilidade / Métricas
+Endpoint `GET /metrics` retorna algo como:
+```json
+{
+	"time": 1710000000000,
+	"sessions": {
+		"loja1": {
+			"state": "open",
+			"restartCount": 2,
+			"criticalCount": 0,
+			"lastDisconnectCode": 515,
+			"lastOpenAt": 1710000000000,
+			"hasQR": false,
+			"messagesInMemory": 120
+		}
+	},
+	"rates": {
+		"sendBuckets": { "loja1": 18.4 },
+		"creationPerIp": { "203.0.113.10": 1 },
+		"globalCreatesLastMin": 3
+	}
+}
+```
+Cada sessão mantém `sessions/<id>/meta.json` com counters persistidos (restartCount, criticalCount, lastDisconnectCode, lastOpenAt). Útil para reinícios sem perder contexto operacional.
 
 ## Próximas melhorias sugeridas
 Ver seção "Sugestões" ao final (ou PRs são bem-vindos!).

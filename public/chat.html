@@ -23,12 +23,15 @@
     </div>
   </div>
   <script>
-    const params = new URLSearchParams(location.search);
-    const session_id = params.get('session_id');
+    let session_id = null;
     const list = document.getElementById('messages');
     const to = document.getElementById('to');
     const text = document.getElementById('text');
     const sendBtn = document.getElementById('send');
+    function resolveSession(){
+      try { session_id = localStorage.getItem('sessionId') } catch {}
+    }
+    resolveSession()
 
     function pushMsg(who, content) {
       const el = document.createElement('div');
@@ -38,9 +41,44 @@
       list.scrollTop = list.scrollHeight;
     }
 
+    function ingestInitial(messages){
+      if(!Array.isArray(messages)) return
+      // ordenar por timestamp asc
+      messages.sort((a,b)=> (a.timestamp||0)-(b.timestamp||0))
+      for(const m of messages){
+        pushMsg(m.fromMe ? 'me' : 'bot', m.text || '[sem texto]')
+      }
+    }
+
+    let currentES = null;
+    function clearMessages(){ list.innerHTML=''; }
+    function startStream(){
+      if(!session_id){ return }
+      if(currentES){ try{ currentES.close() }catch{} }
+      const es = new EventSource(`/sessions/${encodeURIComponent(session_id)}/stream`)
+      currentES = es
+      es.addEventListener('recent', ev => {
+        try { const data = JSON.parse(ev.data); ingestInitial(data) } catch {}
+      })
+      es.addEventListener('message', ev => {
+        try { const m = JSON.parse(ev.data); pushMsg(m.fromMe ? 'me' : 'bot', m.text || '[sem texto]') } catch {}
+      })
+      es.addEventListener('status', ev => {
+        // Podemos futuramente exibir estado da sessão
+      })
+      es.onerror = () => {
+        // tentativa simples de reconexão após 3s
+        try { es.close() } catch {}
+        setTimeout(startStream, 3000)
+      }
+    }
+
+    if(session_id){ startStream() } else { pushMsg('bot','Faça login para inicializar a sessão.') }
+
     sendBtn.onclick = async () => {
-      const payload = { session_id, to: to.value.trim(), text: text.value.trim() };
-      if (!payload.session_id || !payload.to || !payload.text) return alert('Preencha todos os campos');
+      const payload = { to: to.value.trim(), text: text.value.trim() };
+      if (!session_id){ return alert('Sem sessão ativa. Refaça o login.') }
+      if (!payload.to || !payload.text) return alert('Preencha os campos');
       pushMsg('me', payload.text);
       text.value = '';
       const r = await fetch('/messages/send', {
