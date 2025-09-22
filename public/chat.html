@@ -28,10 +28,18 @@
     const to = document.getElementById('to');
     const text = document.getElementById('text');
     const sendBtn = document.getElementById('send');
-    function resolveSession(){
-      try { session_id = localStorage.getItem('sessionId') } catch {}
+    async function resolveSession(){
+      try {
+        session_id = localStorage.getItem('sessionId') || null;
+        if(!session_id){
+          // tenta obter via /me/session (cookie uid httpOnly)
+          const r = await fetch('/me/session');
+          if(r.ok){ const j = await r.json(); session_id = j.sessionId; localStorage.setItem('sessionId', session_id); }
+        }
+        if(session_id){ startStream(); }
+      } catch{}
     }
-    resolveSession()
+    resolveSession();
 
     function pushMsg(who, content) {
       const el = document.createElement('div');
@@ -73,10 +81,10 @@
       }
     }
 
-    if(session_id){ startStream() } else { pushMsg('bot','Faça login para inicializar a sessão.') }
+  if(!session_id){ pushMsg('bot','Fazendo resolução da sessão...') }
 
     sendBtn.onclick = async () => {
-      const payload = { to: to.value.trim(), text: text.value.trim() };
+  const payload = { to: to.value.trim(), text: text.value.trim() };
       if (!session_id){ return alert('Sem sessão ativa. Refaça o login.') }
       if (!payload.to || !payload.text) return alert('Preencha os campos');
       pushMsg('me', payload.text);

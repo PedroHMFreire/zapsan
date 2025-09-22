@@ -530,10 +530,10 @@
 
   // Conectar QR
   $('#qr-open')?.addEventListener('click', async ()=>{
-    const id = $('#qr-session')?.value?.trim()
-    if(!id) return toast('Informe session_id','err')
-    await fetch('/sessions/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:id})})
-    localStorage.setItem('session_id', id)
+    // Usa sessionId determinístico salvo no login
+    const id = localStorage.getItem('sessionId') || localStorage.getItem('session_id') || ''
+    if(!id) return toast('Faça login primeiro','err')
+    try { await fetch('/sessions/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:id})}) } catch {}
     window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank')
   })
 
@@ -556,7 +556,7 @@
   async function renderSchedules(){ const box = $('#sched-list'); if(!box) return; const arr = await fetchSchedules(); box.innerHTML = arr.length? arr.map(s=>`• ${new Date(s.when).toLocaleString()} → ${s.to}: "${s.text}" <span style='opacity:.6'>(${s.status})</span>`).join('<br>') : 'Sem agendamentos.' }
   renderSchedules()
   $('#sched-save')?.addEventListener('click', async ()=>{
-    const session_id = $('#sched-session')?.value?.trim() || localStorage.getItem('session_id') || ''
+  const session_id = localStorage.getItem('sessionId') || localStorage.getItem('session_id') || ''
     const to = $('#sched-to')?.value?.trim()
     const text = $('#sched-text')?.value?.trim()
     const when = $('#sched-when')?.value
@@ -704,11 +704,10 @@
     // If earlier listeners failed (elements absent), attach now.
     $('#qr-open')?.getAttribute('data-bound') || $('#qr-open')?.addEventListener('click', async ()=>{
       const el = $('#qr-session');
-      const id = el && el.value ? el.value.trim() : '';
-      if(!id) return toast('Informe session_id','err');
+      const id = localStorage.getItem('sessionId') || localStorage.getItem('session_id') || '';
+      if(!id) return toast('Faça login antes','err');
       try {
         await fetch('/sessions/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:id})});
-        localStorage.setItem('session_id', id);
         window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank');
       } catch { toast('Erro ao criar sessão','err'); }
     });

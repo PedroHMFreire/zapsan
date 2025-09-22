@@ -37,7 +37,11 @@
       setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500);
     }
     const params = new URLSearchParams(location.search);
-    const id = params.get('session_id');
+    let id = params.get('session_id');
+    if(!id){
+      // fallback: usar sessionId salvo
+      try { id = localStorage.getItem('sessionId') } catch{}
+    }
     const img = document.querySelector('#qrimg');
     const skel = document.getElementById('qrSkeleton');
     const statusEl = document.getElementById('status');
@@ -95,8 +99,8 @@
     async function ensureSessionStarted(){
       if(!id) return;
       try {
-        // dispara criação sem incomodar se já existir
         await fetch('/sessions/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:id})});
+        try { localStorage.setItem('sessionId', id) } catch {}
       } catch {}
     }
 
