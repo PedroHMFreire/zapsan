@@ -301,14 +301,29 @@ r.get('/me', (req: Request, res: Response) => {
   res.json({ userId: uid, sessionId })
 })
 
-r.get('/me/profile', (req: Request, res: Response) => {
-  const uid = (req.cookies?.uid) || ''
-  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-  const sessionId = getOrCreateUserSession(uid)
-  const plan = getPlan(uid)
-  const usage = getUsage(sessionId)
-  const status = getSessionStatus(sessionId)
-  res.json({ userId: uid, sessionId, plan, usage, session: status })
+r.get('/me/profile', async (req: Request, res: Response) => {
+  try {
+    const uid = (req.cookies?.uid) || ''
+    if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+    const sessionId = getOrCreateUserSession(uid)
+    const usage = getUsage(sessionId)
+    const status = getSessionStatus(sessionId)
+    // Tenta buscar perfil no Supabase (name, plan) se integração ativa
+    let name: string | undefined
+    let plan: string | undefined
+    try {
+      const prof = await fetchUserProfile(uid)
+      if(prof){ name = prof.name; plan = (prof.plan as string) || undefined }
+    } catch {}
+    // fallback de plano local se nada veio do Supabase
+    if(!plan){
+      const p = getPlan(uid)
+      plan = p?.name || 'Free'
+    }
+    res.json({ userId: uid, sessionId, name, plan, usage, session: status })
+  } catch (err:any){
+    res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
 })
 
 r.post('/me/logout', (req: Request, res: Response) => {
