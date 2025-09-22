@@ -72,14 +72,11 @@
     setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500);
   }
 
-  // Mock conversas
-  const chats=[
-    { id:'5511999990001@s.whatsapp.net', name:'Loja Centro', last:'Pedido #123 preparado', time:'09:12', unread:2, starred:false },
-    { id:'5511999990002@s.whatsapp.net', name:'Cliente VIP', last:'Pode enviar a NF?', time:'Ontem', unread:0, starred:true },
-    { id:'5511999990003@s.whatsapp.net', name:'Fornecedor', last:'Entrega confirmada', time:'Seg', unread:5, starred:false }
-  ];
+  // Estado dinâmico: chats (Map) e mensagens por JID
+  const chatsMap = new Map(); // jid -> { id, name, last, time, unread, starred }
+  const messagesByJid = new Map(); // jid -> [ { id,text,fromMe,timestamp } ]
   let activeFilter='all';
-  let currentChat=null;
+  let currentChat=null; // objeto { id, name }
   const app=document.getElementById('app');
   const listEl=document.getElementById('chat-list');
   const messagesEl=document.getElementById('messages');
@@ -95,69 +92,66 @@
   function renderChatList(){
     listEl.innerHTML='';
     const lastId = localStorage.getItem(LS_CHAT_KEY);
-    chats.filter(c=>{
+    const chatsArr = Array.from(chatsMap.values()).sort((a,b)=> (b.timestamp||0)-(a.timestamp||0));
+    chatsArr.filter(c=>{
       if(activeFilter==='unread') return (c.unread||0) > 0;
       if(activeFilter==='starred') return !!c.starred;
       return true;
-    }).forEach(c=>{
-      const item=document.createElement('div');
+    }).forEach(c => {
+      const item = document.createElement('div');
       item.className='chat-item';
       if(currentChat && currentChat.id===c.id) item.classList.add('is-active');
       if(!currentChat && lastId && lastId===c.id) item.classList.add('is-active');
       const unreadBadge = (c.unread||0) > 0 ? `<span class="unread">${c.unread}</span>` : '';
       const star = `<button class="star-btn" data-star="${c.id}" aria-label="Marcar favorito">${c.starred?'★':'☆'}</button>`;
-      item.innerHTML=`<div class="avatar"></div><div class="meta"><div class="name">${c.name} ${star}</div><div class="last">${c.last}</div></div><div class="time">${c.time} ${unreadBadge}</div>`;
+      item.innerHTML = `<div class="avatar"></div><div class="meta"><div class="name">${c.name||c.id} ${star}</div><div class="last">${escapeHtml(c.last||'')}</div></div><div class="time">${c.time||''} ${unreadBadge}</div>`;
       item.addEventListener('click',(ev)=>{
         const target = ev.target;
-        if(target && target.closest && target.closest('.star-btn')) return; // Evita abrir chat ao clicar no star
-        selectChat(c);
+        if(target && target.closest && target.closest('.star-btn')) return;
+        selectChat(c.id);
       });
       listEl.appendChild(item);
-    });
-    // Bind star buttons
+    })
+    // estrela toggle
     listEl.querySelectorAll('.star-btn').forEach(btn=>{
       btn.addEventListener('click', function(e){
         e.stopPropagation();
-        const id = this.getAttribute('data-star');
-        const chat = chats.find(ch=>ch.id===id);
+        const id=this.getAttribute('data-star');
+        const chat=chatsMap.get(id);
         if(chat){ chat.starred=!chat.starred; renderChatList(); }
       })
     })
   }
 
-  function selectChat(c){
-    currentChat=c;
-    localStorage.setItem(LS_CHAT_KEY, c.id);
-    // clear unread count when opened
-    c.unread=0;
-    peerName.textContent=c.name;
+  function escapeHtml(t){ return t.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]||c)) }
+
+  function selectChat(jid){
+    const chat = chatsMap.get(jid);
+    if(!chat) return;
+    currentChat = chat;
+    localStorage.setItem(LS_CHAT_KEY, chat.id);
+    chat.unread = 0;
+    peerName.textContent = chat.name || chat.id;
     messagesEl.innerHTML='';
-    // mock initial messages
-    const seed=[
-      {dir:'in', text:'Olá, em que posso ajudar?'},
-      {dir:'out', text:'Quero detalhes do pedido.'},
-      {dir:'in', text:'Claro! Pedido #123 sai hoje.'}
-    ];
-    seed.forEach(m=>pushMsg(m.dir,m.text));
-    if(window.matchMedia('(max-width:1023px)').matches){
-      app.dataset.view='chat';
-      backBtn.style.display='inline-block';
-    }
-    // atualizar destaque
+    const msgs = messagesByJid.get(jid)||[];
+    msgs.sort((a,b)=>a.timestamp-b.timestamp).forEach(m=>pushMsg(m.fromMe?'out':'in', m.text, m.id));
+    if(window.matchMedia('(max-width:1023px)').matches){ app.dataset.view='chat'; backBtn.style.display='inline-block'; }
     document.querySelectorAll('.chat-item').forEach(el=>el.classList.remove('is-active'));
-    // pequeno atraso para garantir render (caso chamado antes do primeiro render final)
     requestAnimationFrame(()=>{
-      [...document.querySelectorAll('.chat-item')].find(el=>el.textContent.includes(c.name))?.classList.add('is-active');
-    });
+      [...document.querySelectorAll('.chat-item')].find(el=>el.textContent.includes(chat.name||chat.id))?.classList.add('is-active');
+    })
     scrollBottom();
+    renderChatList(); // atualiza contadores
   }
 
-  function pushMsg(dir,text){
-    const id = Date.now().toString(36)+'-'+(msgSeq++).toString(36);
+  function pushMsg(dir,text,id){
+    const temp = !id;
+    id = id || (Date.now().toString(36)+'-'+(msgSeq++).toString(36));
     const el=document.createElement('div');
     el.className='msg '+(dir==='out'?'out':'in');
     el.setAttribute('data-id', id);
     el.textContent=text;
+    if(temp) el.classList.add('pending');
     // etiqueta existente via API (fetch preguiçoso)
     fetch('/tags').then(r=>r.ok?r.json():{tags:{}}).then(j=>{
       const t=j.tags||{}; if(t[id]){ const tagEl=document.createElement('div'); tagEl.className='meta'; tagEl.textContent='#'+t[id]; el.appendChild(tagEl); }
@@ -209,8 +203,8 @@
     if(!currentChat){ toast('Selecione uma conversa','err'); return; }
     const text=(textInput.value||'').trim();
     if(!text) return;
-    pushMsg('out',text);
-    const payload={ session_id: localStorage.getItem('session_id') || '', to: currentChat.id, text };
+    const optimisticId = pushMsg('out',text); // retorna undefined, mas mantemos classe pending; iremos reconciliar via SSE
+    const payload={ session_id: localStorage.getItem('session_id') || '', to: currentChat.id, text, client_ref: optimisticId };
     textInput.value='';
     autoResize(textInput);
     try{
@@ -252,6 +246,44 @@
     });
   });
 
+  // Busca real (debounce)
+  const searchInput = document.getElementById('search');
+  let searchTimer=null;
+  if(searchInput){
+    searchInput.addEventListener('input', ()=>{
+      clearTimeout(searchTimer);
+      const q = searchInput.value.trim();
+      if(!q){ renderChatList(); return; }
+      searchTimer=setTimeout(()=> runSearch(q), 350);
+    });
+  }
+  async function runSearch(q){
+    const sessionId = localStorage.getItem('session_id');
+    if(!sessionId) return;
+    try{
+      const r=await fetch(`/sessions/${encodeURIComponent(sessionId)}/search?q=${encodeURIComponent(q)}`);
+      if(!r.ok) return;
+      const j=await r.json();
+      const hits=(j.results||[]).slice(0,50); // limitar
+      // mapear hits a chats e reordenar artificialmente
+      const now=Date.now();
+      hits.forEach((h,i)=>{
+        const jid = h.fromMe? (h.to||h.from): h.from;
+        if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
+        // adicionar ghost message se não existir
+        if(!messagesByJid.get(jid).some(m=>m.id===h.id)){
+          messagesByJid.get(jid).push({ id:h.id, text:h.text||'', fromMe:!!h.fromMe, timestamp:h.timestamp||now });
+        }
+        let chat = chatsMap.get(jid);
+        if(!chat){ chat = { id:jid, name:jid, last:h.text?.slice(0,60)||'', time: formatTime(h.timestamp||now), unread:0, starred:false, timestamp: h.timestamp||now }; chatsMap.set(jid, chat); }
+        chat.last = h.text?.slice(0,60)||'';
+        chat.timestamp = now + (1000 - i); // força ordenar pelo resultado
+        chat.time = formatTime(chat.timestamp);
+      });
+      renderChatList();
+    }catch{}
+  }
+
   // Attachment button behavior (placeholder)
   const attachBtn=document.getElementById('attach');
   if(attachBtn){
@@ -260,20 +292,130 @@
     fileInput.style.display='none';
     document.body.appendChild(fileInput);
     attachBtn.addEventListener('click',()=>fileInput.click());
-    fileInput.addEventListener('change',()=>{
-      if(fileInput.files && fileInput.files[0]){
-        toast('Arquivo selecionado: '+fileInput.files[0].name);
-      }
+    fileInput.addEventListener('change', async ()=>{
+      if(!(currentChat && fileInput.files && fileInput.files[0])) return;
+      const f=fileInput.files[0];
+      const sessionId = localStorage.getItem('session_id')||'';
+      if(!sessionId){ toast('Sem sessão','err'); return; }
+      // placeholder msg
+      const placeholderId = pushMsg('out', `📎 Enviando ${f.name}...`);
+      const form = new FormData();
+      form.append('session_id', sessionId);
+      form.append('to', currentChat.id);
+      form.append('file', f);
+      try{
+        const r=await fetch('/messages/media',{method:'POST', body: form});
+        if(!r.ok){ toast('Falha upload','err'); }
+        else {
+          // A mensagem real chegará via SSE; podemos marcar placeholder como enviado
+          const el = messagesEl.querySelector(`[data-id="${placeholderId}"]`);
+          if(el){ el.classList.remove('pending'); el.textContent = `📎 ${f.name}`; }
+        }
+      }catch{ toast('Erro rede upload','err'); }
+      finally { fileInput.value=''; }
     });
   }
 
-  renderChatList();
-  // Restaurar última conversa se existir
-  const restoreId=localStorage.getItem(LS_CHAT_KEY);
-  if(restoreId){
-    const found=chats.find(c=>c.id===restoreId);
-    if(found) selectChat(found);
+  async function loadInitial(){
+    const sessionId = localStorage.getItem('session_id');
+    if(!sessionId) return;
+    // aguardar até estado open (tentativa leve)
+    try {
+      const st = await fetch(`/sessions/${encodeURIComponent(sessionId)}/status`).then(r=>r.ok?r.json():null);
+      if(!st || st.state!=='open'){ /* não bloqueia, ainda assim tenta buscar novas */ }
+    } catch {}
+    let data=[]; try { const r=await fetch(`/sessions/${encodeURIComponent(sessionId)}/messages?limit=500`); if(r.ok){ const j=await r.json(); data=j.messages||[] } } catch {}
+    // Normalizar e agrupar
+    data.forEach(m=>{
+      const jid = m.fromMe ? (m.to || m.from) : m.from;
+      if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
+      messagesByJid.get(jid).push({ id:m.id, text:m.text||'', fromMe:!!m.fromMe, timestamp:m.timestamp||Date.now() });
+    });
+    // Construir chats
+    messagesByJid.forEach((arr,jid)=>{
+      const lastMsg = arr.slice().sort((a,b)=>b.timestamp-a.timestamp)[0];
+      chatsMap.set(jid, { id: jid, name: jid, last: lastMsg?.text?.slice(0,60)||'', time: formatTime(lastMsg?.timestamp), unread:0, starred:false, timestamp: lastMsg?.timestamp||0 })
+    });
+    renderChatList();
+    // Restaurar último chat
+    const restoreId=localStorage.getItem(LS_CHAT_KEY);
+    if(restoreId && chatsMap.has(restoreId)) selectChat(restoreId);
   }
+
+  function formatTime(ts){ if(!ts) return ''; const d=new Date(ts); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+
+  loadInitial();
+  renderChatList();
+  // ====== Tempo real (SSE) - Passo 2 ======
+  let evtSource=null;
+  let sseRetry=0;
+  function startSSE(){
+    const sessionId = localStorage.getItem('session_id');
+    if(!sessionId){ return; }
+    if(evtSource){ evtSource.close(); }
+    const url = `/sessions/${encodeURIComponent(sessionId)}/stream`;
+    try {
+      evtSource = new EventSource(url);
+    } catch (e){ console.warn('SSE init falhou', e); scheduleReconnect(); return; }
+    evtSource.onopen = ()=>{ sseRetry=0; console.log('SSE aberto'); };
+    evtSource.onerror = (e)=>{ console.warn('SSE erro', e); evtSource && evtSource.close(); scheduleReconnect(); };
+    evtSource.onmessage = (e)=>{
+      if(!e.data) return;
+      let payload; try{ payload=JSON.parse(e.data); }catch{return;}
+      handleSSE(payload);
+    };
+  }
+  function scheduleReconnect(){
+    sseRetry = Math.min(sseRetry+1, 6); // limite ~6 -> backoff ~32s max
+    const delay = Math.min(1000 * Math.pow(2, sseRetry), 30000);
+    setTimeout(()=>startSSE(), delay);
+  }
+  function handleSSE(ev){
+    if(ev.type==='ready'){ return; }
+    if(ev.type==='message'){ // nova mensagem
+      const m = ev.message || ev;
+      const jid = m.fromMe ? (m.to || m.from) : m.from;
+      if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
+      // evitar duplicados
+      if(!messagesByJid.get(jid).some(x=>x.id===m.id)){
+        messagesByJid.get(jid).push({ id:m.id, text:m.text||'', fromMe:!!m.fromMe, timestamp:m.timestamp||Date.now() });
+      }
+      // Reconciliação otimista: se mensagem fromMe e possuímos .pending com mesmo texto recente
+      if(m.fromMe && currentChat && currentChat.id===jid){
+        // procure a última .pending cujo texto combine
+        const pendings = [...messagesEl.querySelectorAll('.msg.out.pending')];
+        for(let i=pendings.length-1;i>=0;i--){
+          const el=pendings[i];
+          if(el.textContent=== (m.text||'')){ el.classList.remove('pending'); el.setAttribute('data-id', m.id); break; }
+        }
+      }
+      // atualizar chat
+      const arr = messagesByJid.get(jid);
+      const lastMsg = arr.slice().sort((a,b)=>b.timestamp-a.timestamp)[0];
+      let chat = chatsMap.get(jid);
+      if(!chat){ chat = { id:jid, name:jid, last:'', time:'', unread:0, starred:false, timestamp:0 }; chatsMap.set(jid, chat); }
+      chat.last = lastMsg?.text?.slice(0,60)||'';
+      chat.timestamp = lastMsg?.timestamp||Date.now();
+      chat.time = formatTime(chat.timestamp);
+      // unread se não está aberto e mensagem é inbound
+      if(!(currentChat && currentChat.id===jid) && !m.fromMe){ chat.unread = (chat.unread||0)+1; }
+      // se chat aberto, render incremental
+      if(currentChat && currentChat.id===jid){
+        // só adicionar se não reconciliado (sem elemento com data-id)
+        if(!messagesEl.querySelector(`[data-id="${m.id}"]`)){
+          pushMsg(m.fromMe?'out':'in', m.text||'', m.id);
+        }
+      }
+      renderChatList();
+      return;
+    }
+    if(ev.type==='message_status'){ // apenas poderia atualizar UI futura (ticks)
+      // placeholder: no momento ignorado, mas poderíamos alterar classe visual
+      return;
+    }
+  }
+  // iniciar SSE após pequeno atraso para garantir session_id e histórico
+  setTimeout(startSSE, 800);
   // ==== Modal utilities & feature mocks ====
   function $(s,root=document){return root.querySelector(s)}
   function show(id){ $(id).classList.add('show') }
