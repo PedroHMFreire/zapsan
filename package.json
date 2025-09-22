@@ -15,6 +15,7 @@
     "net:check": "node --dns-result-order=ipv4first scripts/net-check.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
     "@types/multer": "^2.0.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.3",
     "cors": "^2.8.5",

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
 import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages as getMessagesNew, sendMedia, getAllSessionMeta, cleanLogout, createIdleSession, nukeAllSessions, getSessionStatus, onMessageStream } from './wa'
 import { authenticate, upsertUserIfMissing, findUser, createUser } from './users'
+import { registerUser, loginUser, fetchUserProfile } from './supaUsers'
 import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
@@ -74,43 +75,50 @@ const r = Router()
 // === Auth & sessão por usuário ===
 // /auth/register: cria novo usuário; /auth/login: apenas autentica (sem auto-criação) ou aceita legacy { user }
 
-r.post('/auth/register', (req: Request, res: Response) => {
+r.post('/auth/register', async (req: Request, res: Response) => {
   try {
     const name = String(req.body?.name||'').trim()
     const emailRaw = String(req.body?.email||'').trim().toLowerCase()
     const password = String(req.body?.password||'')
     const confirm = String(req.body?.confirm||'')
     if(!emailRaw || !password) return res.status(400).json({ error: 'missing_fields' })
-    if(password.length < 4) return res.status(400).json({ error: 'weak_password' })
+    if(password.length < 6) return res.status(400).json({ error: 'weak_password' })
     if(password !== confirm) return res.status(400).json({ error: 'password_mismatch' })
-    if(findUser(emailRaw)) return res.status(409).json({ error: 'user_exists' })
-    const u = createUser(name, emailRaw, password)
-    const sessionId = getOrCreateUserSession(u.id)
-    res.cookie('uid', u.id, { httpOnly: false })
-    res.status(201).json({ ok:true, userId: u.id, sessionId, created:true })
+    const out = await registerUser(name, emailRaw, password)
+    if(!out.ok){
+      const map: Record<string, number> = { user_exists: 409, supabase_signup_failed: 502 }
+      const code = out.error ? (map[out.error] || 400) : 400
+      return res.status(code).json({ error: out.error || 'registration_failed' })
+    }
+    const sessionId = getOrCreateUserSession(out.userId!)
+    res.cookie('uid', out.userId!, { httpOnly: true, sameSite: 'lax', secure: false })
+    res.status(201).json({ ok:true, userId: out.userId, sessionId, created: out.created })
   } catch(err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
-r.post('/auth/login', (req: Request, res: Response) => {
+r.post('/auth/login', async (req: Request, res: Response) => {
   try {
     const legacyUser = String(req.body?.user||'').trim()
     const emailRaw = String(req.body?.email||'').trim().toLowerCase()
     const password = String(req.body?.password||'')
+    if(!emailRaw && !legacyUser) return res.status(400).json({ error: 'missing_credentials' })
     let userId = ''
     if(emailRaw){
-      if(!findUser(emailRaw)) return res.status(404).json({ error: 'user_not_found' })
-      const ok = authenticate(emailRaw, password)
-      if(!ok) return res.status(401).json({ error: 'invalid_credentials' })
-      userId = emailRaw
-    } else if(legacyUser){
-      userId = legacyUser
+      const out = await loginUser(emailRaw, password)
+      if(!out.ok){
+        const map: Record<string, number> = { invalid_credentials: 401, supabase_login_failed: 502 }
+        const code = out.error ? (map[out.error] || 400) : 400
+        return res.status(code).json({ error: out.error || 'login_failed' })
+      }
+      userId = out.userId!
     } else {
-      return res.status(400).json({ error: 'missing_credentials' })
+      // legacy fallback
+      userId = legacyUser
     }
     const sessionId = getOrCreateUserSession(userId)
-    res.cookie('uid', userId, { httpOnly: false })
+    res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false })
     res.json({ ok:true, userId, sessionId })
   } catch(err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
