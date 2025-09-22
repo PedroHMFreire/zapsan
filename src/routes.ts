@@ -1,9 +1,13 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
-import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages } from './wa'
-import { queryMessages } from './messageStore'
+import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages, sendMedia } from './wa'
+import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
+import { queryMessages } from './messageStore'
+import { search } from './searchIndex'
+import { sseHandler } from './realtime'
+// fs/path já importados acima
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
 
 // === Simple JSON persistence helpers ===
@@ -50,6 +54,7 @@ schedules.filter(s => s.status === 'pending').forEach(scheduleDispatch)
 // import { actualExportedName as createOrLoadSession, getQR, sendText } from './wa'
 
 const r = Router()
+const upload = multer({ dest: path.join(process.cwd(), 'data', 'uploads') })
 
 // Saúde do serviço
 r.get('/health', (_req: Request, res: Response) => {
@@ -133,6 +138,20 @@ r.post('/messages/send', async (req: Request, res: Response) => {
   }
 })
 
+// Enviar mídia via upload multipart
+r.post('/messages/media', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    const { session_id, to, caption } = req.body || {}
+    if (!session_id || !to || !req.file) return res.status(400).json({ error: 'bad_request', message: 'session_id, to e file são obrigatórios' })
+    await createOrLoadSession(String(session_id))
+    await sendMedia(String(session_id), String(to), req.file.path, { caption })
+    return res.json({ ok: true })
+  } catch (err: any) {
+    const code = err?.message === 'session_not_found' ? 404 : 500
+    return res.status(code).json({ error: err?.message || 'internal_error' })
+  }
+})
+
 // Status da sessão
 r.get('/sessions/:id/status', (req: Request, res: Response) => {
   try {
@@ -159,6 +178,24 @@ r.get('/sessions/:id/messages', (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
+})
+
+// Busca textual (índice invertido em memória; sessão usada apenas para validar existência futura)
+r.get('/sessions/:id/search', (req: Request, res: Response) => {
+  try {
+    const q = String(req.query.q || '').trim()
+    if (!q) return res.status(400).json({ error: 'empty_query' })
+    const limit = Number(req.query.limit || 20)
+    const results = search(q, isNaN(limit) ? 20 : limit)
+    return res.json({ results })
+  } catch (err: any) {
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// SSE stream em tempo real
+r.get('/sessions/:id/stream', (req: Request, res: Response) => {
+  sseHandler(req, res)
 })
 
 export default r

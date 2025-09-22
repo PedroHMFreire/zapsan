@@ -16,6 +16,8 @@ import fs from 'fs'
 import path from 'path'
 import QRCode from 'qrcode'
 import { appendMessage, updateMessageStatus } from './messageStore'
+import { indexMessage } from './searchIndex'
+import { broadcast } from './realtime'
 import http from 'http'
 import https from 'https'
 
@@ -201,8 +203,10 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         const rec = { id, from, to: fromMe ? from : undefined, text, timestamp, fromMe, pushName, mediaType, mediaPath }
         sess.messages!.push(rec)
         if (sess.messages!.length > 500) sess.messages!.splice(0, sess.messages!.length - 500)
-        appendMessage(sessionId, rec)
+  appendMessage(sessionId, rec)
+  indexMessage(rec as any)
         console.log(`[wa][msg][${sessionId}] ${fromMe ? '>>' : '<<'} ${from} ${mediaType ? '['+mediaType+'] ' : ''}${text ? '- ' + text.slice(0,120) : ''}`)
+  broadcast(sessionId, 'message', rec)
         // Webhook
         if (process.env.WEBHOOK_URL) {
           try {
@@ -228,6 +232,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           const status = (u.update.status !== undefined) ? String(u.update.status) : undefined
           if (status) {
             updateMessageStatus(sessionId, u.key.id!, status)
+            broadcast(sessionId, 'message_status', { id: u.key.id, status })
           }
           console.log('[wa][msg.update]', sessionId, u.key.id, status)
         } catch {}
@@ -272,6 +277,29 @@ export async function sendText(sessionId: string, to: string, text: string) {
     : `${to.replace(/\D/g, '')}@s.whatsapp.net`
 
   await s.sock.sendMessage(jid, { text })
+}
+
+// Envio de mídia genérico
+export async function sendMedia(sessionId: string, to: string, filePath: string, options: { caption?: string, mimetype?: string }) {
+  const s = sessions.get(sessionId)
+  if (!s?.sock) throw new Error('session_not_found')
+
+  const jid = to.includes('@s.whatsapp.net') || to.includes('@g.us')
+    ? to
+    : `${to.replace(/\D/g, '')}@s.whatsapp.net`
+
+  const buffer = fs.readFileSync(filePath)
+  // Heurística simples de tipo
+  const mime = options.mimetype || require('mime-types').lookup(filePath) || 'application/octet-stream'
+
+  let message: any = { caption: options.caption }
+  if (mime.startsWith('image/')) message.image = buffer
+  else if (mime.startsWith('video/')) message.video = buffer
+  else if (mime.startsWith('audio/')) message.audio = buffer
+  else if (mime === 'image/webp') message.sticker = buffer
+  else message.document = buffer, message.mimetype = mime, message.fileName = path.basename(filePath)
+
+  await s.sock.sendMessage(jid, message)
 }
 
 // Novo: estado resumido da sessão

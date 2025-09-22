@@ -73,6 +73,9 @@ npm start
 - `GET /sessions/:id/status`
 - `GET /sessions/:id/debug`
 - `GET /sessions/:id/messages?limit=100&before=TIMESTAMP&after=TIMESTAMP&from=JID&direction=in|out&search=texto`
+- `POST /messages/media` (multipart: file, session_id, to, caption?)
+- `GET /sessions/:id/search?q=texto&limit=20` (busca índice invertido)
+- `GET /sessions/:id/stream` (SSE eventos: message, message_status)
 - `POST /messages/send` → `{ session_id, to, text }`
 
 ## Configurar o bot
@@ -91,6 +94,7 @@ Pode usar variáveis no formato `${VAR}` que serão substituídas se existirem e
 | SYNC_FULL_HISTORY | Se =1, tenta sincronizar histórico completo ao conectar sessão | 0 |
 | SAVE_MEDIA | Se =1, baixa mídias recebidas em `data/media/<session>` | 0 |
 | WEBHOOK_URL | URL (http/https) para POST em cada mensagem recebida | (vazio) |
+| ENABLE_SSE | Futuro controle (não obrigatório) para ligar/desligar SSE | (não usado) |
 
 ## Estrutura principal
 | Caminho | Função |
@@ -121,6 +125,8 @@ Ver seção "Sugestões" ao final (ou PRs são bem-vindos!).
 - Suporte a IA responder com base em mídia (OCR / legendas).
 - Persistência em banco (SQLite / Postgres) para mensagens.
 - Fila de envio e retentativas com status detalhado.
+- Reindex parcial com TTL / compressão de índice.
+- Mecanismo de autenticação para SSE e uploads.
 
 ## Deploy sugerido (Render)
 - Build: `npm i && npm run build`

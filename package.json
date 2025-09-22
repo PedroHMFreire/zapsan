@@ -15,11 +15,13 @@
     "net:check": "node --dns-result-order=ipv4first scripts/net-check.mjs"
   },
   "dependencies": {
+    "@types/multer": "^2.0.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "morgan": "^1.10.1",
+    "multer": "^2.0.2",
     "pino": "^9.4.0",
     "qrcode": "^1.5.4",
     "yaml": "^2.5.1"
