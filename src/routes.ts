@@ -90,9 +90,11 @@ r.post('/auth/register', async (req: Request, res: Response) => {
       const code = out.error ? (map[out.error] || 400) : 400
       return res.status(code).json({ error: out.error || 'registration_failed' })
     }
-    const sessionId = getOrCreateUserSession(out.userId!)
-    res.cookie('uid', out.userId!, { httpOnly: true, sameSite: 'lax', secure: false })
-    res.status(201).json({ ok:true, userId: out.userId, sessionId, created: out.created })
+  const sessionId = getOrCreateUserSession(out.userId!)
+  // dispara inicialização (não aguarda) para já preparar QR se necessário
+  createOrLoadSession(sessionId).catch(()=>{})
+  res.cookie('uid', out.userId!, { httpOnly: true, sameSite: 'lax', secure: false })
+  res.status(201).json({ ok:true, userId: out.userId, sessionId, created: out.created, sessionBoot: true })
   } catch(err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -117,9 +119,11 @@ r.post('/auth/login', async (req: Request, res: Response) => {
       // legacy fallback
       userId = legacyUser
     }
-    const sessionId = getOrCreateUserSession(userId)
-    res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false })
-    res.json({ ok:true, userId, sessionId })
+  const sessionId = getOrCreateUserSession(userId)
+  // garante que a sessão será criada/carregada no primeiro login (lazy fire & forget)
+  createOrLoadSession(sessionId).catch(()=>{})
+  res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false })
+  res.json({ ok:true, userId, sessionId, sessionBoot: true })
   } catch(err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -491,8 +495,11 @@ r.get('/sessions/:id/stream', (req: Request, res: Response) => {
   const unsub = onMessageStream(id, (m) => {
     if (closed) return
     try {
+      // Envia mensagem achatada para compatibilidade com front antigo (chat.html) que faz JSON.parse(ev.data) direto.
+      // Mantemos um campo type para futuras distinções, mas colocamos os atributos no nível raiz.
+      const payload = { type: 'message', ...m }
       res.write(`event: message\n`)
-      res.write(`data: ${JSON.stringify(m)}\n\n`)
+      res.write(`data: ${JSON.stringify(payload)}\n\n`)
     } catch {}
   })
   req.on('close', () => { closed = true; try { unsub() } catch {} })

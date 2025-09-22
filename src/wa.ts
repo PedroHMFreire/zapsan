@@ -157,6 +157,34 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
   const baseDir = path.join(SESS_DIR, sessionId)
   ensureDir(baseDir)
+  // Hidratar histórico persistido (se ainda não carregado em sessionMsgs)
+  try {
+    if(!sessionMsgs.get(sessionId)){
+      const dataFile = path.join(process.cwd(), 'data', 'messages', `${sessionId}.json`)
+      if(fs.existsSync(dataFile)){
+        const raw = fs.readFileSync(dataFile,'utf8')
+        const parsed = JSON.parse(raw)
+        if(Array.isArray(parsed.messages)){
+          const restored: Msg[] = parsed.messages.map((m:any)=>({
+            id: String(m.id||''),
+            from: String(m.from||''),
+            to: m.to? String(m.to): undefined,
+            text: m.text? String(m.text): '',
+            fromMe: !!m.fromMe,
+            timestamp: typeof m.timestamp==='number'? m.timestamp : Date.now()
+          })).filter((x: Msg)=>x.id && x.from)
+          if(restored.length){
+            const MAX=5000
+            const slice = restored.slice(-MAX)
+            sessionMsgs.set(sessionId, slice)
+            // Reindexar (best-effort)
+            try { slice.forEach(r=>{ try { indexMessage({ id:r.id, from:r.from, to:r.to, text:r.text||'', timestamp:r.timestamp, fromMe: !!r.fromMe }) } catch{} }) } catch {}
+            console.log('[wa][hydrate]', sessionId, { restored: slice.length })
+          }
+        }
+      }
+    }
+  } catch (err:any){ console.warn('[wa][hydrate][error]', sessionId, err?.message) }
   // load persisted meta if exists
   const meta = loadMeta(baseDir)
   const manual = isManualMode()
@@ -305,17 +333,30 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
     sock.ev.on('messages.upsert', async ({ messages }) => {
       if(!messages?.length) return
       for(const m of messages){
-        const id   = m.key?.id || String(Date.now())
-        const from = m.key?.remoteJid || ''
-        const fromMe = !!m.key?.fromMe
-        const text = m.message?.conversation
-                  || (m.message as any)?.extendedTextMessage?.text
-                  || (m.message as any)?.imageMessage?.caption
-                  || (m.message as any)?.videoMessage?.caption
-                  || ''
-        const to   = fromMe ? ( (m.key as any)?.participant || from) : undefined
-        const ts   = (m.messageTimestamp ? Number(m.messageTimestamp) : Date.now()) * 1000
-        pushMsg(sessionId, { id, from, to, text, fromMe, timestamp: ts })
+        try {
+          const id   = m.key?.id || String(Date.now())
+          const from = m.key?.remoteJid || ''
+          const fromMe = !!m.key?.fromMe
+          const text = m.message?.conversation
+                    || (m.message as any)?.extendedTextMessage?.text
+                    || (m.message as any)?.imageMessage?.caption
+                    || (m.message as any)?.videoMessage?.caption
+                    || ''
+          const to   = fromMe ? ( (m.key as any)?.participant || from) : undefined
+          // Baileys timestamp vem em segundos (normalmente). Convertemos para ms apenas se parecer razoável.
+          let tsRaw = m.messageTimestamp ? Number(m.messageTimestamp) : (Date.now()/1000)
+          if(tsRaw < 10_000_000_000) { // heurística: se ainda em segundos
+            tsRaw = tsRaw * 1000
+          }
+          const ts = Math.floor(tsRaw)
+          const msgObj = { id, from, to, text, fromMe, timestamp: ts }
+          pushMsg(sessionId, msgObj)
+          // Persistir em disco e indexar para busca/histórico
+          try { appendMessage(sessionId, { ...msgObj, text, fromMe }) } catch {}
+          try { indexMessage({ id, from, to, text, timestamp: ts, fromMe }) } catch {}
+        } catch(err:any){
+          try { console.warn('[wa][messages.upsert][err]', sessionId, err && (err as any).message) } catch {}
+        }
       }
     })
 
