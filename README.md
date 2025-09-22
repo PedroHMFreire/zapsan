@@ -70,6 +70,9 @@ npm start
 - `GET /health`
 - `POST /sessions/create` → `{ session_id }`
 - `GET /sessions/:id/qr`
+- `GET /sessions/:id/status`
+- `GET /sessions/:id/debug`
+- `GET /sessions/:id/messages?limit=100&before=TIMESTAMP&after=TIMESTAMP&from=JID&direction=in|out&search=texto`
 - `POST /messages/send` → `{ session_id, to, text }`
 
 ## Configurar o bot
@@ -85,6 +88,9 @@ Pode usar variáveis no formato `${VAR}` que serão substituídas se existirem e
 | OPENAI_MODEL | Modelo da API Chat | gpt-4o-mini |
 | BOT_NAME | Nome do atendente | Atendente Santê |
 | BUSINESS_NAME | Nome do negócio | Santê Moda |
+| SYNC_FULL_HISTORY | Se =1, tenta sincronizar histórico completo ao conectar sessão | 0 |
+| SAVE_MEDIA | Se =1, baixa mídias recebidas em `data/media/<session>` | 0 |
+| WEBHOOK_URL | URL (http/https) para POST em cada mensagem recebida | (vazio) |
 
 ## Estrutura principal
 | Caminho | Função |
@@ -109,12 +115,12 @@ Ver seção "Sugestões" ao final (ou PRs são bem-vindos!).
 ---
 
 ## Sugestões (roadmap curto)
-- Adicionar endpoint para listar sessões e status.
-- Implementar reconexão automática ao desconectar (hoje apenas loga).
+- Endpoint para listar todas as sessões ativas.
 - Rate limit básico nos endpoints públicos.
 - Validação de payload com Zod ou similar.
-- Suporte a mensagens de mídia (imagens, áudio) na IA.
-- Persistência opcional de histórico de conversa (arquivo ou DB).
+- Suporte a IA responder com base em mídia (OCR / legendas).
+- Persistência em banco (SQLite / Postgres) para mensagens.
+- Fila de envio e retentativas com status detalhado.
 
 ## Deploy sugerido (Render)
 - Build: `npm i && npm run build`

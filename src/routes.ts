@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
 import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages } from './wa'
+import { queryMessages } from './messageStore'
 import fs from 'fs'
 import path from 'path'
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
@@ -143,12 +144,17 @@ r.get('/sessions/:id/status', (req: Request, res: Response) => {
   }
 })
 
-// Mensagens recentes da sessão (memória)
+// Mensagens recentes com filtros
 r.get('/sessions/:id/messages', (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const limit = Number(req.query.limit || 100)
-    const msgs = getMessages(id, isNaN(limit) ? 100 : limit)
+    const before = req.query.before ? Number(req.query.before) : undefined
+    const after = req.query.after ? Number(req.query.after) : undefined
+    const from = req.query.from ? String(req.query.from) : undefined
+    const direction = req.query.direction === 'in' || req.query.direction === 'out' ? req.query.direction : undefined
+    const search = req.query.search ? String(req.query.search) : undefined
+    const msgs = queryMessages(id, { limit, before, after, from, direction: direction as any, search })
     return res.json({ messages: msgs })
   } catch (err: any) {
     return res.status(500).json({ error: 'internal_error', message: err?.message })

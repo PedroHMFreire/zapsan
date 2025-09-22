@@ -10,10 +10,14 @@ import makeWASocket, {
   DisconnectReason,
   WASocket,
 } from '@whiskeysockets/baileys'
+import { proto, downloadMediaMessage } from '@whiskeysockets/baileys'
 import pino from 'pino'
 import fs from 'fs'
 import path from 'path'
 import QRCode from 'qrcode'
+import { appendMessage, updateMessageStatus } from './messageStore'
+import http from 'http'
+import https from 'https'
 
 // Mantém comportamento antigo: pasta local "sessions".
 // Se quiser, pode definir SESS_DIR no Render sem quebrar local.
@@ -79,9 +83,8 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
       printQRInTerminal: false,        // seu front já consome o QR
       browser: ['Ubuntu', 'Chrome', '121'],
       keepAliveIntervalMs: 30_000,
-      // Se quiser que traga o histórico completo ao conectar, mude para true
-      // Cuidado: pode gerar muitas requisições e lentidão em contas grandes.
-      syncFullHistory: false,
+      // Controlado por env: SYNC_FULL_HISTORY=1 para puxar histórico ao conectar
+      syncFullHistory: process.env.SYNC_FULL_HISTORY === '1',
       markOnlineOnConnect: false,
       logger: pino({ level: (process.env.BAILEYS_LOG_LEVEL as pino.Level) || 'warn' }),
     })
@@ -156,7 +159,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
     })
 
     // Listener principal de mensagens
-    sock.ev.on('messages.upsert', (m) => {
+    sock.ev.on('messages.upsert', async (m) => {
       const type = m.type // notify, append, replace
       for (const msg of m.messages) {
         if(!msg.message) continue
@@ -169,11 +172,49 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         const pushName = (msg.pushName || msg.broadcast || '') as string | undefined
         const id = msg.key.id || `${Date.now()}`
         const timestamp = (Number(msg.messageTimestamp) || Date.now()) * 1000
-        // Armazena estrutura simples
-        sess.messages!.push({ id, from, to: fromMe ? from : undefined, text, timestamp, fromMe, pushName })
-        // Limita para não explodir memória
+
+        // Detecta se tem mídia
+        let mediaType: string | undefined
+        let mediaPath: string | undefined
+        if (anyMsg.imageMessage) mediaType = 'image'
+        else if (anyMsg.videoMessage) mediaType = 'video'
+        else if (anyMsg.audioMessage) mediaType = 'audio'
+        else if (anyMsg.documentMessage) mediaType = 'document'
+        else if (anyMsg.stickerMessage) mediaType = 'sticker'
+
+        if (mediaType && process.env.SAVE_MEDIA === '1') {
+          try {
+            const mediaDir = path.join(process.cwd(), 'data', 'media', sessionId)
+            ensureDir(mediaDir)
+            const stream = await downloadMediaMessage(msg, 'buffer', {}, {
+              logger: pino({ level: 'silent' }),
+              reuploadRequest: sock.updateMediaMessage
+            })
+            const ext = mediaType === 'image' ? 'jpg' : mediaType === 'video' ? 'mp4' : mediaType === 'audio' ? 'ogg' : mediaType === 'document' ? (anyMsg.documentMessage.fileName?.split('.').pop() || 'bin') : mediaType === 'sticker' ? 'webp' : 'bin'
+            mediaPath = path.join(mediaDir, `${id}.${ext}`)
+            fs.writeFileSync(mediaPath, stream as Buffer)
+          } catch (e) {
+            try { console.warn('[wa][media][fail]', sessionId, e) } catch {}
+          }
+        }
+
+        const rec = { id, from, to: fromMe ? from : undefined, text, timestamp, fromMe, pushName, mediaType, mediaPath }
+        sess.messages!.push(rec)
         if (sess.messages!.length > 500) sess.messages!.splice(0, sess.messages!.length - 500)
-        console.log(`[wa][msg][${sessionId}] ${fromMe ? '>>' : '<<'} ${from} ${text ? '- ' + text.slice(0,120) : ''}`)
+        appendMessage(sessionId, rec)
+        console.log(`[wa][msg][${sessionId}] ${fromMe ? '>>' : '<<'} ${from} ${mediaType ? '['+mediaType+'] ' : ''}${text ? '- ' + text.slice(0,120) : ''}`)
+        // Webhook
+        if (process.env.WEBHOOK_URL) {
+          try {
+            const url = process.env.WEBHOOK_URL
+            const payload = JSON.stringify({ event: 'message', session: sessionId, message: rec })
+            const mod = url.startsWith('https') ? https : http
+            const req = mod.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } }, (res)=>{ res.resume() })
+            req.on('error', ()=>{})
+            req.write(payload)
+            req.end()
+          } catch {}
+        }
       }
       if (type === 'notify') {
         // pode futuramente disparar webhook/evento
@@ -183,9 +224,13 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
     // Atualizações de status de mensagens (ex: recebida, lida)
     sock.ev.on('messages.update', (updates) => {
       for (const u of updates) {
-        // opcional: poderia marcar status na lista em memória
-        // placeholder log:
-        try { console.log('[wa][msg.update]', sessionId, u.key.id, u.update) } catch {}
+        try {
+          const status = (u.update.status !== undefined) ? String(u.update.status) : undefined
+          if (status) {
+            updateMessageStatus(sessionId, u.key.id!, status)
+          }
+          console.log('[wa][msg.update]', sessionId, u.key.id, status)
+        } catch {}
       }
     })
 
