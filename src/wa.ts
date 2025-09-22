@@ -18,6 +18,7 @@ import QRCode from 'qrcode'
 import { appendMessage, updateMessageStatus } from './messageStore'
 import { indexMessage } from './searchIndex'
 import { broadcast } from './realtime'
+import { prisma } from './db'
 import http from 'http'
 import https from 'https'
 import { EventEmitter } from 'events'
@@ -157,6 +158,14 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
   const baseDir = path.join(SESS_DIR, sessionId)
   ensureDir(baseDir)
+  // Upsert Session no banco (status connecting)
+  try {
+    await prisma.session.upsert({
+      where: { sessionId },
+      update: { status: 'connecting' },
+      create: { sessionId, status: 'connecting' }
+    })
+  } catch (err:any) { console.warn('[wa][prisma][session_upsert][warn]', sessionId, err?.message) }
   // Hidratar histórico persistido (se ainda não carregado em sessionMsgs)
   try {
     if(!sessionMsgs.get(sessionId)){
@@ -274,6 +283,8 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         sess.lastOpenAt = Date.now()
         sess.everOpened = true
         saveMeta(sess)
+        // atualizar status no banco
+        try { await prisma.session.update({ where: { sessionId }, data: { status: 'open' } }) } catch(e:any){ console.warn('[wa][prisma][session_status_open][warn]', sessionId, e?.message) }
       }
 
       if (u.connection === 'close') {
@@ -326,6 +337,8 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           // Modo manual: não reconectar automaticamente
           sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'waiting_manual_retry', qrDataUrl: null, restartCount: sess.restartCount, criticalCount: sess.criticalCount, lastDisconnectCode: sess.lastDisconnectCode, manualMode: true })
         }
+        // persistir status closed
+        try { await prisma.session.update({ where: { sessionId }, data: { status: 'closed' } }) } catch(e:any){ /* silencioso */ }
       }
     })
 
@@ -354,6 +367,30 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           // Persistir em disco e indexar para busca/histórico
           try { appendMessage(sessionId, { ...msgObj, text, fromMe }) } catch {}
           try { indexMessage({ id, from, to, text, timestamp: ts, fromMe }) } catch {}
+          // Persistir em Postgres
+          try {
+            const waMsgId = id
+            const jid = from
+            const body = text || null
+            // Converte timestamp ms para Date
+            const tsDate = new Date(ts)
+            await prisma.message.create({
+              data: {
+                session: { connect: { sessionId } },
+                jid,
+                waMsgId,
+                fromMe,
+                body,
+                timestamp: tsDate,
+                raw: m as any
+              }
+            })
+          } catch (e:any) {
+            // Evitar spam massivo: log só mensagem resumida
+            if(!/Unique constraint|Foreign key/.test(e?.message||'')){
+              console.warn('[wa][prisma][message_create][warn]', sessionId, e?.message)
+            }
+          }
         } catch(err:any){
           try { console.warn('[wa][messages.upsert][err]', sessionId, err && (err as any).message) } catch {}
         }
@@ -383,8 +420,36 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
     sock.ev.on('chats.upsert', (chats) => {
       try { console.log('[wa][chats.upsert]', sessionId, chats.length) } catch {}
     })
-    sock.ev.on('contacts.upsert', (cts) => {
+    sock.ev.on('contacts.upsert', async (cts) => {
       try { console.log('[wa][contacts.upsert]', sessionId, cts.length) } catch {}
+      try {
+        for(const c of cts){
+          try {
+            await prisma.contact.upsert({
+              where: { sessionId_jid: { sessionId, jid: c.id } },
+              update: { name: (c as any).notify || (c as any).name || null, isGroup: false },
+              create: { session: { connect: { sessionId } }, jid: c.id, name: (c as any).notify || (c as any).name || null, isGroup: false }
+            })
+          } catch (e:any){ /* ignorar individuais */ }
+        }
+      } catch (e:any){ console.warn('[wa][prisma][contacts_upsert][warn]', sessionId, e?.message) }
+    })
+    // Tipagem de Baileys nem sempre expõe 'chats.set'; usar cast para compat
+    ;(sock.ev as any).on('chats.set', async (payload: any) => {
+      const chats = payload?.chats || []
+      try { console.log('[wa][chats.set]', sessionId, chats.length) } catch {}
+      try {
+        for(const ch of chats){
+          const isGroup = ch?.id?.endsWith?.('@g.us')
+            try {
+              await prisma.contact.upsert({
+                where: { sessionId_jid: { sessionId, jid: ch.id } },
+                update: { name: ch.name || ch.id, isGroup },
+                create: { session: { connect: { sessionId } }, jid: ch.id, name: ch.name || ch.id, isGroup }
+              })
+            } catch (e:any){ /* ignorar individuais */ }
+        }
+      } catch (e:any){ console.warn('[wa][prisma][chats_set][warn]', sessionId, e?.message) }
     })
   }
 

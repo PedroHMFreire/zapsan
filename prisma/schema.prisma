@@ -39,6 +39,7 @@ model Contact {
   updatedAt  DateTime  @updatedAt
 
   @@index([sessionId, jid])
+  @@unique([sessionId, jid])
 }
 
 model Message {
