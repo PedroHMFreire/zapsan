@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
-import { createOrLoadSession, getQR, sendText, getStatus } from './wa'
+import { createOrLoadSession, getQR, sendText, getStatus, getDebug } from './wa'
 import fs from 'fs'
 import path from 'path'
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
@@ -53,6 +53,16 @@ const r = Router()
 // Saúde do serviço
 r.get('/health', (_req: Request, res: Response) => {
   res.json({ ok: true, uptime: process.uptime() })
+})
+
+// Debug sessão
+r.get('/sessions/:id/debug', (req: Request, res: Response) => {
+  try {
+    const info = getDebug(req.params.id)
+    return res.json(info)
+  } catch (err: any) {
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
 })
 
 // Knowledge base endpoints

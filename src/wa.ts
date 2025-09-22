@@ -26,6 +26,10 @@ type Sess = {
   starting?: boolean
   lastState?: string
   qrDataUrl?: string | null
+  lastQRAt?: number
+  startingSince?: number
+  lastDisconnectCode?: number
+  restartCount?: number
 }
 
 const sessions = new Map<string, Sess>()
@@ -49,7 +53,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
   const baseDir = path.join(SESS_DIR, sessionId)
   ensureDir(baseDir)
-  sessions.set(sessionId, { baseDir, starting: true, qr: null })
+  sessions.set(sessionId, { baseDir, starting: true, startingSince: Date.now(), qr: null, restartCount: (current?.restartCount||0) })
 
   const boot = async () => {
     const sess = sessions.get(sessionId)!
@@ -69,13 +73,15 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
       logger: pino({ level: (process.env.BAILEYS_LOG_LEVEL as pino.Level) || 'warn' }),
     })
 
-    sess.sock = sock
+  sess.sock = sock
     sess.starting = false
     sess.qr = null
 
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('connection.update', async (u) => {
+      // Basic trace
+      try { console.log('[wa][update]', sessionId, { connection: u.connection, qr: !!u.qr, lastDisconnect: (u as any)?.lastDisconnect?.error?.message }) } catch {}
       if (u.connection) {
         sess.lastState = u.connection
       }
@@ -85,6 +91,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           const dataUrl = await QRCode.toDataURL(u.qr, { margin: 0 })
           sess.qr = dataUrl // retrocompat
           sess.qrDataUrl = dataUrl
+          sess.lastQRAt = Date.now()
         } catch {
           sess.qr = null
           sess.qrDataUrl = null
@@ -99,6 +106,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         const code =
           (u.lastDisconnect?.error as any)?.output?.statusCode ||
           (u.lastDisconnect?.error as any)?.status || 0
+        sess.lastDisconnectCode = code
 
         const isStreamErrored =
           code === 515 || (u.lastDisconnect?.error as any)?.message?.includes('Stream Errored')
@@ -109,14 +117,15 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
         // >>> Correção 2: em 515/401, resetar credenciais e re-parear
         if (isStreamErrored || isLoggedOut) {
+          console.warn('[wa][disconnect-critical]', sessionId, { code, isStreamErrored, isLoggedOut })
           nukeDir(baseDir) // limpa a sessão corrompida
-          sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'restarting', qrDataUrl: null })
-          setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 20000)
+          sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'restarting', qrDataUrl: null, restartCount: (sess.restartCount||0)+1 })
+          setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 5000)
           return
         }
 
         // outros motivos (timeout, rede etc) → tenta reconectar preservando auth
-        sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null })
+        sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null, restartCount: (sess.restartCount||0)+1 })
         setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), 1500)
       }
     })
@@ -151,4 +160,21 @@ export function getStatus(sessionId: string) {
   const globalSessions: any = (global as any).sessions
   const s: Sess | undefined = globalSessions?.get?.(sessionId) ?? sessions.get(sessionId)
   return { state: s?.lastState ?? 'unknown', hasQR: !!s?.qrDataUrl }
+}
+
+export function getDebug(sessionId: string) {
+  const s = sessions.get(sessionId)
+  if(!s) return { exists:false }
+  return {
+    exists: true,
+    state: s.lastState,
+    hasQR: !!s.qrDataUrl,
+    lastQRAt: s.lastQRAt,
+    msSinceLastQR: s.lastQRAt? Date.now()-s.lastQRAt : null,
+    starting: !!s.starting,
+    startingSince: s.startingSince,
+    msStarting: s.startingSince? Date.now()-s.startingSince : null,
+    lastDisconnectCode: s.lastDisconnectCode,
+    restartCount: s.restartCount||0
+  }
 }
