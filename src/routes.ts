@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
-import { createOrLoadSession, getQR, sendText, getStatus, getDebug } from './wa'
+import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages } from './wa'
 import fs from 'fs'
 import path from 'path'
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
@@ -138,6 +138,18 @@ r.get('/sessions/:id/status', (req: Request, res: Response) => {
     const { id } = req.params
     const status = getStatus(id)
     return res.json(status)
+  } catch (err: any) {
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Mensagens recentes da sessão (memória)
+r.get('/sessions/:id/messages', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const limit = Number(req.query.limit || 100)
+    const msgs = getMessages(id, isNaN(limit) ? 100 : limit)
+    return res.json({ messages: msgs })
   } catch (err: any) {
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }

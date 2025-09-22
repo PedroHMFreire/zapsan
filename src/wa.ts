@@ -32,6 +32,15 @@ type Sess = {
   restartCount?: number
   criticalCount?: number
   nextRetryAt?: number
+  messages?: Array<{
+    id: string
+    from: string
+    to?: string
+    text: string
+    timestamp: number
+    fromMe: boolean
+    pushName?: string
+  }>
 }
 
 const sessions = new Map<string, Sess>()
@@ -70,6 +79,8 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
       printQRInTerminal: false,        // seu front já consome o QR
       browser: ['Ubuntu', 'Chrome', '121'],
       keepAliveIntervalMs: 30_000,
+      // Se quiser que traga o histórico completo ao conectar, mude para true
+      // Cuidado: pode gerar muitas requisições e lentidão em contas grandes.
       syncFullHistory: false,
       markOnlineOnConnect: false,
       logger: pino({ level: (process.env.BAILEYS_LOG_LEVEL as pino.Level) || 'warn' }),
@@ -78,6 +89,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
   sess.sock = sock
     sess.starting = false
     sess.qr = null
+    if(!sess.messages) sess.messages = []
 
     sock.ev.on('creds.update', saveCreds)
 
@@ -137,10 +149,57 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
         // outros motivos (timeout, rede etc) → tenta reconectar preservando auth
         // reconexão leve (rede): manter QR se ainda não conectou / útil para pairing
-        const lightDelay = 1500
+        const lightDelay = 10000
         sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null, restartCount: (sess.restartCount||0)+1, criticalCount: sess.criticalCount||0, nextRetryAt: Date.now()+lightDelay })
         setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), lightDelay)
       }
+    })
+
+    // Listener principal de mensagens
+    sock.ev.on('messages.upsert', (m) => {
+      const type = m.type // notify, append, replace
+      for (const msg of m.messages) {
+        if(!msg.message) continue
+        const from = msg.key.remoteJid || 'unknown'
+        const fromMe = !!msg.key.fromMe
+        // Extração de texto simples (apenas casos mais comuns)
+        let text = ''
+        const anyMsg: any = msg.message
+        text = anyMsg.conversation || anyMsg.extendedTextMessage?.text || anyMsg.imageMessage?.caption || anyMsg.videoMessage?.caption || ''
+        const pushName = (msg.pushName || msg.broadcast || '') as string | undefined
+        const id = msg.key.id || `${Date.now()}`
+        const timestamp = (Number(msg.messageTimestamp) || Date.now()) * 1000
+        // Armazena estrutura simples
+        sess.messages!.push({ id, from, to: fromMe ? from : undefined, text, timestamp, fromMe, pushName })
+        // Limita para não explodir memória
+        if (sess.messages!.length > 500) sess.messages!.splice(0, sess.messages!.length - 500)
+        console.log(`[wa][msg][${sessionId}] ${fromMe ? '>>' : '<<'} ${from} ${text ? '- ' + text.slice(0,120) : ''}`)
+      }
+      if (type === 'notify') {
+        // pode futuramente disparar webhook/evento
+      }
+    })
+
+    // Atualizações de status de mensagens (ex: recebida, lida)
+    sock.ev.on('messages.update', (updates) => {
+      for (const u of updates) {
+        // opcional: poderia marcar status na lista em memória
+        // placeholder log:
+        try { console.log('[wa][msg.update]', sessionId, u.key.id, u.update) } catch {}
+      }
+    })
+
+    // Recebidos indicadores de recibo (delivered/read)
+    sock.ev.on('message-receipt.update', (receipts) => {
+      try { console.log('[wa][receipt]', sessionId, receipts.length) } catch {}
+    })
+
+    // Atualizações de chats (metadados) - útil para depuração
+    sock.ev.on('chats.upsert', (chats) => {
+      try { console.log('[wa][chats.upsert]', sessionId, chats.length) } catch {}
+    })
+    sock.ev.on('contacts.upsert', (cts) => {
+      try { console.log('[wa][contacts.upsert]', sessionId, cts.length) } catch {}
     })
   }
 
@@ -196,4 +255,11 @@ export function getDebug(sessionId: string) {
     nextRetryAt: s.nextRetryAt || null,
     msUntilRetry: s.nextRetryAt ? Math.max(0, s.nextRetryAt - Date.now()) : null
   }
+}
+
+// Expor mensagens recentes (em memória)
+export function getMessages(sessionId: string, limit = 100) {
+  const s = sessions.get(sessionId)
+  if(!s?.messages) return []
+  return s.messages.slice(-limit)
 }
