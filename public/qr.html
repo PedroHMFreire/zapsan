@@ -83,7 +83,9 @@
           redirected = true;
           toast('Conectado!');
           setTimeout(() => {
-            location.href = `/chat.html?session_id=${encodeURIComponent(id)}`;
+            // Redireciona para o console principal já logado
+            try { localStorage.setItem('sessionId', id) } catch {}
+            location.href = `/`;
           }, 1200);
         } else if(s.state === 'restarting' || s.state === 'reconnecting') {
           statusEl.textContent = 'Reconectando...';
