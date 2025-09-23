@@ -17,6 +17,7 @@ import { getOrCreateUserSession } from './userSessions'
 import { recordMessage, checkQuota, getUsage, getPlan } from './usage'
 import { prisma } from './db'
 import { setUserSession, ensureSessionStarted } from './userSessions'
+import { hasSupabaseEnv } from './supabase'
 
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -74,6 +75,17 @@ schedules.filter(s => s.status === 'pending').forEach(scheduleDispatch)
 
 const r = Router()
 
+// Diagnóstico de ambiente de autenticação (não expõe chaves reais)
+r.get('/debug/auth-env', (_req: Request, res: Response) => {
+  const flags = {
+    hasSupabaseEnv: hasSupabaseEnv(),
+    SUPABASE_URL_SET: !!process.env.SUPABASE_URL,
+    SUPABASE_ANON_KEY_SET: !!process.env.SUPABASE_ANON_KEY,
+    SUPABASE_SERVICE_ROLE_KEY_SET: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+  }
+  res.json(flags)
+})
+
 // === Auth & sessão por usuário ===
 // /auth/register: cria novo usuário; /auth/login: apenas autentica (sem auto-criação) ou aceita legacy { user }
 
@@ -112,7 +124,13 @@ r.post('/auth/login', async (req: Request, res: Response) => {
     if(emailRaw){
       const out = await loginUser(emailRaw, password)
       if(!out.ok){
-        const map: Record<string, number> = { invalid_credentials: 401, supabase_login_failed: 502 }
+        const map: Record<string, number> = {
+          invalid_credentials: 401,
+          supabase_login_failed: 502,
+          supabase_config_error: 500,
+          supabase_network_error: 503,
+          supabase_unavailable: 503
+        }
         const code = out.error ? (map[out.error] || 400) : 400
         return res.status(code).json({ error: out.error || 'login_failed' })
       }

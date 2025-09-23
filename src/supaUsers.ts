@@ -1,4 +1,5 @@
 import { getSupabase, hasSupabaseEnv } from './supabase'
+import { logger } from './logger'
 import { createUser as createLocalUser, findUser as findLocalUser, authenticate as authLocal } from './users'
 
 // Tabela esperada no Supabase: profiles (ou users) com colunas: id (uuid ou text), email, name, plan
@@ -51,18 +52,41 @@ export async function registerUser(name: string, email: string, password: string
 export async function loginUser(email: string, password: string): Promise<AuthResult> {
   const emailLc = email.toLowerCase().trim()
   if(!hasSupabaseEnv()){
-    const u = await authLocal(emailLc, password)
-    if(!u) return { ok:false, error:'invalid_credentials' }
-    return { ok:true, userId: u.id }
+    try {
+      const u = await authLocal(emailLc, password)
+      if(!u) return { ok:false, error:'invalid_credentials' }
+      return { ok:true, userId: u.id }
+    } catch(err:any){
+      logger.error({ msg:'local_auth_error', email: emailLc, err: err?.message })
+      return { ok:false, error:'internal_error' }
+    }
   }
-  const supabase = getSupabase()
-  const { data, error } = await supabase.auth.signInWithPassword({ email: emailLc, password })
-  if(error){
-    if(error.message.toLowerCase().includes('invalid')) return { ok:false, error:'invalid_credentials' }
-    return { ok:false, error:'supabase_login_failed' }
+  let supabase
+  try { supabase = getSupabase() } catch(err:any){
+    logger.error({ msg:'supabase_config_error', err: err?.message })
+    return { ok:false, error:'supabase_config_error' }
   }
-  const uid = data.user?.id || emailLc
-  return { ok:true, userId: uid }
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: emailLc, password })
+    if(error){
+      const msg = (error.message||'').toLowerCase()
+      if(msg.includes('invalid') || msg.includes('invalid login credentials')){
+        return { ok:false, error:'invalid_credentials' }
+      }
+      logger.warn({ msg:'supabase_login_failed', email: emailLc, supabaseError: error.message })
+      return { ok:false, error:'supabase_login_failed' }
+    }
+    const uid = data.user?.id || emailLc
+    return { ok:true, userId: uid }
+  } catch(err:any){
+    const emsg = String(err?.message||'')
+    if(/fetch failed|network|timeout/i.test(emsg)){
+      logger.error({ msg:'supabase_network_error', email: emailLc, err: emsg })
+      return { ok:false, error:'supabase_network_error' }
+    }
+    logger.error({ msg:'supabase_unexpected_error', email: emailLc, err: emsg })
+    return { ok:false, error:'supabase_unavailable' }
+  }
 }
 
 export async function fetchUserProfile(userIdOrEmail: string): Promise<SupaUserData | null> {
