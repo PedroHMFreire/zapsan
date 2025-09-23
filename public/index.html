@@ -379,6 +379,14 @@
       pfQuota.textContent=j.plan?.quotaDaily||0;
       pfUsageTotal.textContent=j.usage?.total||0;
       pfState.textContent=j.session?.state||'—';
+      // Persistir session_id para garantir que o restante da UI (SSE, envio) tenha a sessão correta
+      try {
+        if(j.sessionId){
+          localStorage.setItem('session_id', j.sessionId);
+          // manter chave alternativa (legacy) se algum código usa
+          if(!localStorage.getItem('sessionId')) localStorage.setItem('sessionId', j.sessionId);
+        }
+      } catch {}
       const st=j.session?.state;
       const manual = (window.MANUAL_PAIRING === '1');
       btnRegen.style.display = manual && (st==='pairing' || st==='idle') ? 'inline-block':'none';
