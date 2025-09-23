@@ -1,79 +1,117 @@
-import fs from 'fs'
-import path from 'path'
 import crypto from 'crypto'
+import { prisma } from './db'
 
-export interface UserRecord {
-  id: string // same as email (lowercased) for now
-  name: string
-  email: string
-  passHash: string // format: scrypt$N$r$p$salt$hash
-  createdAt: number
-  updatedAt: number
+// Mantemos compatibilidade mínima exportando tipos semelhantes aos antigos (campos públicos)
+export interface UserPublic {
+  id: string
+  phone: string
+  name?: string | null
+  createdAt: Date
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data')
-const USERS_FILE = path.join(DATA_DIR, 'users.json')
-
-function ensureDataDir(){ try { fs.mkdirSync(DATA_DIR, { recursive: true }) } catch {} }
-
-function loadAll(): UserRecord[] {
-  ensureDataDir()
-  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')) as UserRecord[] } catch { return [] }
-}
-function saveAll(list: UserRecord[]) {
-  try { fs.writeFileSync(USERS_FILE, JSON.stringify(list, null, 2), 'utf8') } catch {}
-}
-
-let cache: UserRecord[] | null = null
-
-function db(): UserRecord[] { if(!cache) cache = loadAll(); return cache }
-
-// Simple scrypt wrapper
-function hashPassword(password: string): string {
+// === Hash helpers (scrypt) ===
+function hash(password: string): Promise<string> {
   const salt = crypto.randomBytes(16)
   const N = 16384, r = 8, p = 1, keylen = 64
-  const hash = crypto.scryptSync(password, salt, keylen, { N, r, p }) as Buffer
-  return `scrypt$${N}$${r}$${p}$${salt.toString('base64')}$${hash.toString('base64')}`
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, keylen, { N, r, p }, (err, derived) => {
+      if (err) return reject(err)
+      resolve(`scrypt$${N}$${r}$${p}$${salt.toString('base64')}$${(derived as Buffer).toString('base64')}`)
+    })
+  })
 }
 
-function verifyPassword(password: string, stored: string): boolean {
+function verify(password: string, stored?: string | null): Promise<boolean> {
+  if(!stored) return Promise.resolve(false)
   try {
     const [algo,Ns,rs,ps,saltB64,hashB64] = stored.split('$')
-    if(algo !== 'scrypt') return false
+    if(algo !== 'scrypt') return Promise.resolve(false)
     const N = Number(Ns), r = Number(rs), p = Number(ps)
     const salt = Buffer.from(saltB64, 'base64')
     const expected = Buffer.from(hashB64, 'base64')
-    const got = crypto.scryptSync(password, salt, expected.length, { N, r, p }) as Buffer
-    return crypto.timingSafeEqual(expected, got)
-  } catch { return false }
+    return new Promise((resolve) => {
+      crypto.scrypt(password, salt, expected.length, { N, r, p }, (err, derived) => {
+        if(err) return resolve(false)
+        try { resolve(crypto.timingSafeEqual(expected, derived as Buffer)) } catch { resolve(false) }
+      })
+    })
+  } catch { return Promise.resolve(false) }
 }
 
-export function findUser(email: string): UserRecord | undefined {
-  const id = email.toLowerCase()
-  return db().find(u => u.id === id)
+// === Mapeadores ===
+function toPublic(u: any): UserPublic { return { id: u.id, phone: u.phone, name: u.name, createdAt: u.createdAt } }
+
+// === Funções exigidas pela nova API (phone baseado) ===
+export async function createUser({ phone, name, password }: { phone: string; name?: string; password: string }): Promise<UserPublic> {
+  const exists = await prisma.user.findUnique({ where: { phone } })
+  if(exists) throw new Error('user_exists')
+  const passwordHash = await hash(password)
+  const u = await prisma.user.create({ data: { phone, name, passwordHash } })
+  return toPublic(u)
 }
 
-export function createUser(name: string, email: string, password: string): UserRecord {
-  const id = email.toLowerCase()
-  if(findUser(id)) throw new Error('user_exists')
-  const now = Date.now()
-  const u: UserRecord = { id, name: name || id.split('@')[0], email: id, passHash: hashPassword(password), createdAt: now, updatedAt: now }
-  db().push(u)
-  saveAll(db())
-  return u
+export async function verifyLogin({ phone, password }: { phone: string; password: string }): Promise<{ ok: boolean; user?: UserPublic }> {
+  const u = await prisma.user.findUnique({ where: { phone } })
+  if(!u) return { ok:false }
+  const ok = await verify(password, u.passwordHash)
+  if(!ok) return { ok:false }
+  return { ok:true, user: toPublic(u) }
 }
 
-export function upsertUserIfMissing(name: string, email: string, password: string): UserRecord {
-  const existing = findUser(email)
-  if(existing) return existing
-  return createUser(name, email, password)
-}
-
-export function authenticate(email: string, password: string): UserRecord | null {
-  const u = findUser(email)
+export async function getUser(idOrPhone: string): Promise<UserPublic | null> {
+  let where: any
+  if(/^[0-9a-fA-F-]{36}$/.test(idOrPhone) || idOrPhone.startsWith('u_')){ // uuid simples ou prefixado
+    where = { id: idOrPhone }
+  } else {
+    where = { phone: idOrPhone }
+  }
+  const u = await prisma.user.findUnique({ where })
   if(!u) return null
-  if(!verifyPassword(password, u.passHash)) return null
-  return u
+  return toPublic(u)
 }
 
-export function listUsers(): UserRecord[] { return [...db()] }
+export async function listUsers(): Promise<UserPublic[]> {
+  const list = await prisma.user.findMany({ orderBy: { createdAt: 'desc' } })
+  return list.map(toPublic)
+}
+
+export async function updateUser(id: string, patch: { name?: string; phone?: string; password?: string }): Promise<UserPublic> {
+  const existing = await prisma.user.findUnique({ where: { id } })
+  if(!existing) throw new Error('user_not_found')
+  const data: any = {}
+  if(typeof patch.name === 'string') data.name = patch.name
+  if(typeof patch.phone === 'string') data.phone = patch.phone
+  if(typeof patch.password === 'string' && patch.password){
+    data.passwordHash = await hash(patch.password)
+  }
+  const u = await prisma.user.update({ where: { id }, data })
+  return toPublic(u)
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  try {
+    await prisma.user.delete({ where: { id } })
+  } catch (err:any){
+    if(err.code === 'P2025') throw new Error('user_not_found')
+    throw err
+  }
+}
+
+// Compatibilidade com rotas antigas que usam authenticate / upsertUserIfMissing / findUser
+// Mantemos assinaturas mas redirecionamos para novas funções (mapeando email->phone)
+export async function findUser(phone: string){
+  return prisma.user.findUnique({ where: { phone } })
+}
+
+export async function upsertUserIfMissing(name: string, phone: string, password: string){
+  const u = await prisma.user.findUnique({ where: { phone } })
+  if(u) return u
+  const created = await createUser({ phone, name, password })
+  return { id: created.id, phone: created.phone, name: created.name, createdAt: created.createdAt }
+}
+
+export async function authenticate(phone: string, password: string){
+  const { ok, user } = await verifyLogin({ phone, password })
+  if(!ok || !user) return null
+  return { id: user.id, phone: user.phone, name: user.name }
+}

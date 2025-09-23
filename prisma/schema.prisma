@@ -14,6 +14,7 @@ model User {
   id        String    @id @default(uuid())
   phone     String    @unique
   name      String?
+  passwordHash String?
   sessions  Session[]
   createdAt DateTime  @default(now())
 }
