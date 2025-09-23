@@ -5,7 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Santê Console</title>
   <link rel="stylesheet" href="/styles.css" />
-  <script>(function(){try{const a=localStorage.getItem('auth')==='ok';const onL=location.pathname.endsWith('/login.html');if(!a&&!onL){location.replace('/login.html');}if(a&&onL){location.replace('/');}}catch(e){}})();</script>
+  <script>(function(){
+    try {
+      const onLogin = location.pathname.endsWith('/login.html');
+      const hasFlag = localStorage.getItem('auth')==='ok';
+      // Shim: garantir chave legacy session_id usando sessionId se existir
+      try { const sid = localStorage.getItem('sessionId'); if(sid && !localStorage.getItem('session_id')) localStorage.setItem('session_id', sid); } catch {}
+      if(onLogin && hasFlag){ location.replace('/'); return; }
+      if(!hasFlag){
+        // tentativa silenciosa de validar cookie/sessão; se falhar, força login
+        fetch('/me/profile',{method:'GET'}).then(r=>{
+          if(r.status===401){ if(!onLogin) location.replace('/login.html'); }
+          else if(r.ok){ if(onLogin) location.replace('/'); else localStorage.setItem('auth','ok'); }
+          else { if(!onLogin) location.replace('/login.html'); }
+        }).catch(()=>{ if(!onLogin) location.replace('/login.html'); });
+      }
+    } catch {}
+  })();</script>
 </head>
 <body>
   <header class="topbar"><div class="topbar-inner">
@@ -524,18 +540,39 @@
 
   // Open modals
   $('#menu-flow')?.addEventListener('click', ()=>show('#mdl-flow'))
-  $('#menu-qr')?.addEventListener('click', ()=>show('#mdl-qr'))
+  $('#menu-qr')?.addEventListener('click', ()=>{ openQRModal(); })
   $('#menu-schedule')?.addEventListener('click', ()=>show('#mdl-schedule'))
   $('#menu-tags')?.addEventListener('click', ()=>show('#mdl-tags'))
 
-  // Conectar QR
-  $('#qr-open')?.addEventListener('click', async ()=>{
-    // Usa sessionId determinístico salvo no login
-    const id = localStorage.getItem('sessionId') || localStorage.getItem('session_id') || ''
-    if(!id) return toast('Faça login primeiro','err')
-    try { await fetch('/sessions/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:id})}) } catch {}
-    window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank')
-  })
+  // ====== Nova lógica QR ======
+  function getSessionId(){ return localStorage.getItem('sessionId') || localStorage.getItem('session_id') || '' }
+  // Reuso de variáveis globais se já definidas anteriormente
+  if(typeof qrPollTimer==='undefined'){ window.qrPollTimer=null; }
+  let qrStatusTimer=null;
+  function clearQRTimers(){ if(qrPollTimer) clearTimeout(qrPollTimer); if(qrStatusTimer) clearTimeout(qrStatusTimer); }
+  async function fetchStatus(id){ try{ const r=await fetch(`/sessions/${encodeURIComponent(id)}/status`); if(!r.ok) return null; return await r.json(); }catch{ return null } }
+  async function fetchQR(){ try{ const r=await fetch('/me/session/qr'); if(!r.ok) return null; const j=await r.json(); return j.dataUrl }catch{ return null } }
+  async function ensureSessionCreated(id){ try { await fetch('/sessions/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:id})}) } catch {} }
+  async function startManual(id){ try { const r=await fetch(`/sessions/${encodeURIComponent(id)}/start`,{method:'POST'}); return r.ok } catch { return false } }
+  function setQRState(s){ const el=document.getElementById('qr-state'); if(el) el.textContent=s||'—'; }
+  function showEl(id,show){ const el=document.getElementById(id); if(el) el.style.display=show? 'block':'none'; }
+  async function pollQRImage(){ const imgEl=document.getElementById('qr-image'); const wrap=document.getElementById('qr-image-wrap'); if(!imgEl||!wrap) return; const code=await fetchQR(); if(code){ imgEl.src=code; wrap.style.display='block'; } else { wrap.style.display='none'; } qrPollTimer=setTimeout(pollQRImage,6000); }
+  async function pollStatusLoop(){ const id=getSessionId(); if(!id) return; const st=await fetchStatus(id); if(st){ setQRState(st.state); updateQRUIForState(st.state); } qrStatusTimer=setTimeout(pollStatusLoop,5000); }
+  function updateQRUIForState(state){ const connected=document.getElementById('qr-connected'); const imgWrap=document.getElementById('qr-image-wrap'); const btnStart=document.getElementById('qr-start'); const btnRegen=document.getElementById('qr-regen'); const btnClean=document.getElementById('qr-clean'); const btnOpenTab=document.getElementById('qr-open-newtab'); const manual = window.MANUAL_PAIRING==='1';
+    if(state==='open'){ connected.style.display='block'; imgWrap.style.display='none'; btnStart.style.display='none'; btnRegen.style.display= manual? 'inline-block':'none'; btnClean.style.display='inline-block'; btnOpenTab.style.display='none'; clearTimeout(qrPollTimer); }
+    else if(state==='pairing'){ connected.style.display='none'; btnStart.style.display='none'; btnRegen.style.display= manual? 'inline-block':'none'; btnClean.style.display='inline-block'; btnOpenTab.style.display='inline-block'; pollQRImage(); }
+    else { // idle / closed / undefined
+      connected.style.display='none'; imgWrap.style.display='none'; btnRegen.style.display='none'; btnOpenTab.style.display='none'; btnClean.style.display='inline-block'; btnStart.style.display= manual? 'inline-block':'none'; if(!manual){ // auto criar
+          const id=getSessionId(); if(id){ ensureSessionCreated(id); }
+        }
+    }
+  }
+  async function openQRModal(){ const modal=document.getElementById('mdl-qr'); if(!modal) return; modal.classList.add('show'); clearQRTimers(); const id=getSessionId(); if(!id){ setQRState('sem sessão'); return; } setQRState('carregando...'); const prof = await fetch('/me/profile').then(r=>r.ok?r.json():null).catch(()=>null); const state = prof?.session?.state; if(!state){ await ensureSessionCreated(id); }
+    updateQRUIForState(state||'idle'); pollStatusLoop(); if(state==='pairing'){ pollQRImage(); } }
+  document.getElementById('qr-start')?.addEventListener('click', async ()=>{ const id=getSessionId(); if(!id) return toast('Sem sessão','err'); const ok=await startManual(id); if(!ok) return toast('Falha iniciar','err'); setQRState('pairing'); updateQRUIForState('pairing'); pollQRImage(); })
+  document.getElementById('qr-regen')?.addEventListener('click', async ()=>{ const id=getSessionId(); if(!id) return; await fetch(`/sessions/${encodeURIComponent(id)}/qr/regenerate`,{method:'POST'}).catch(()=>{}); toast('Solicitado novo QR'); })
+  document.getElementById('qr-clean')?.addEventListener('click', async ()=>{ await fetch('/me/session/clean',{method:'POST'}).catch(()=>{}); toast('Sessão limpa'); clearQRTimers(); setQRState('idle'); updateQRUIForState('idle'); })
+  document.getElementById('qr-open-newtab')?.addEventListener('click', ()=>{ const id=getSessionId(); if(!id) return; window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank'); })
 
   // === Flows (API) ===
   async function createFlow(){
@@ -644,15 +681,30 @@
     </div>
   </div>
 
-  <!-- Conectar QR -->
+  <!-- Conectar QR (reutiliza sessão existente) -->
   <div class="modal" id="mdl-qr">
     <div class="modal-card">
       <div class="modal-h"><strong>Conectar QR</strong><button class="m-btn" data-close>✕</button></div>
-      <div class="modal-b">
-        <div class="row"><span class="label">Session ID</span><input class="input" id="qr-session" placeholder="Ex. santemoda-01"></div>
-        <p class="help">Cria a sessão e abre o QR em nova aba.</p>
+      <div class="modal-b" style="display:flex;flex-direction:column;gap:12px;">
+        <div>Estado: <span id="qr-state">—</span></div>
+        <div id="qr-connected" style="display:none;color:#69e4a6;font-weight:600;">Sessão conectada ✅</div>
+        <div id="qr-image-wrap" style="display:none;text-align:center;">
+          <img id="qr-image" alt="QR" style="max-width:240px;border:1px solid var(--wa-border);padding:6px;border-radius:8px;background:var(--wa-panel)" />
+          <p class="help" style="margin-top:6px;">Escaneie no WhatsApp para conectar.</p>
+        </div>
+        <div class="help" id="qr-hint">A sessão é ligada ao seu usuário. Reabrir este modal mostra o status atual.</div>
       </div>
-      <div class="modal-f"><button class="m-btn" data-close>Fechar</button><button class="btn" id="qr-open">Abrir QR</button></div>
+      <div class="modal-f" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" id="qr-start" style="display:none;">Iniciar sessão</button>
+          <button class="btn outline" id="qr-regen" style="display:none;">Regenerar QR</button>
+          <button class="btn outline" id="qr-open-newtab" style="display:none;">Abrir em aba</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn outline" id="qr-clean" style="display:none;">Desvincular</button>
+          <button class="m-btn" data-close>Fechar</button>
+        </div>
+      </div>
     </div>
   </div>
 

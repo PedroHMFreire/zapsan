@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.reply = reply;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const knowledge_1 = require("./knowledge");
 const logger_1 = require("./logger");
 const yaml_1 = __importDefault(require("yaml"));
 function loadBotConfig() {
@@ -35,7 +36,13 @@ Objetivo: ajudar o cliente a escolher produtos de moda. Se necessário, peça ta
 }
 async function reply(input) {
     const cfg = loadBotConfig();
-    const system = buildSystemPrompt(cfg);
+    const systemBase = buildSystemPrompt(cfg);
+    // Selecionar seções relevantes da base de conhecimento
+    const sections = (0, knowledge_1.selectSections)(input.text || '');
+    const contextBlock = sections.length
+        ? sections.map(s => `(Seção: ${s.heading})\n${s.content.trim()}`).join('\n\n')
+        : 'Nenhuma seção relevante encontrada. Solicite gentilmente mais detalhes ao cliente.';
+    const system = `${systemBase}\n\nINSTRUÇÕES DE CONTEXTO:\nVocê deve basear sua resposta SOMENTE no contexto abaixo.\nSe a informação não estiver presente, peça mais detalhes ou admita que precisa confirmar.\nNão invente produtos, políticas, tamanhos ou condições.\n\n[Contexto]\n${contextBlock}`;
     const apiKey = process.env.OPENAI_API_KEY;
     const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     // Fallback sem OpenAI

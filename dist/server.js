@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
+const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const cors_1 = __importDefault(require("cors"));
 const path_1 = __importDefault(require("path"));
 const dns_1 = require("dns");
@@ -25,8 +26,31 @@ process.on('uncaughtException', (err) => {
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
-// Frontend estático (sem bundler)
+app.use((0, cookie_parser_1.default)());
+// Frontend estático (sem bundler) - servimos depois dos redirects básicos
 const pub = path_1.default.join(process.cwd(), 'public');
+// Redireciona sempre para /login.html se não autenticado (cookie uid ausente) quando acessa raiz ou páginas principais
+app.get(['/', '/index.html'], (req, res, next) => {
+    try {
+        const uid = req.cookies?.uid;
+        if (!uid) {
+            return res.redirect(302, '/login.html');
+        }
+        // autenticado: segue fluxo normal (servir index via estático)
+        return res.sendFile(path_1.default.join(pub, 'index.html'));
+    }
+    catch {
+        return res.redirect(302, '/login.html');
+    }
+});
+// Se já autenticado e abrir /login.html manualmente, redireciona para /
+app.get('/login.html', (req, res, next) => {
+    const uid = req.cookies?.uid;
+    if (uid) {
+        return res.redirect(302, '/');
+    }
+    return res.sendFile(path_1.default.join(pub, 'login.html'));
+});
 app.use(express_1.default.static(pub));
 // Rotas da API
 app.use('/', routes_1.default);

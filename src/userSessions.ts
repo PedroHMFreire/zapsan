@@ -1,38 +1,42 @@
-import fs from 'fs'
-import path from 'path'
+import crypto from 'crypto'
+import { prisma } from './db'
 import { createOrLoadSession } from './wa'
 
-const DATA_FILE = path.join(process.cwd(), 'data', 'user-sessions.json')
-type MapShape = { [userId: string]: string }
-let mapping: MapShape = {}
-
-function load(){
-  try { mapping = JSON.parse(fs.readFileSync(DATA_FILE,'utf8')) } catch { mapping = {} }
-}
-function save(){
-  try { fs.mkdirSync(path.dirname(DATA_FILE), { recursive:true }) } catch {}
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(mapping, null, 2)) } catch {}
-}
-load()
-
-export function getOrCreateUserSession(userId: string){
+// Retorna a sessionId mais recente ou cria uma nova vinculada ao userId
+export async function getOrCreateUserSession(userId: string): Promise<string> {
   if(!userId) throw new Error('missing_user')
-  let sid = mapping[userId]
-  if(!sid){
-    sid = 'u_' + userId
-    mapping[userId] = sid
-    save()
-  }
-  return sid
+  const existing = await prisma.session.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } })
+  if(existing) return existing.sessionId
+  const sessionId = 'u_' + crypto.randomUUID()
+  await prisma.session.create({ data: { sessionId, status: 'connecting', userId } })
+  return sessionId
 }
 
-export async function ensureSessionStarted(userId: string){
-  const sid = getOrCreateUserSession(userId)
-  // inicia se ainda não estiver em memória
-  await createOrLoadSession(sid)
-  return sid
+export async function getUserSession(userId: string): Promise<string | null> {
+  if(!userId) return null
+  const existing = await prisma.session.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } })
+  return existing?.sessionId || null
 }
 
-export function listUserSessions(){
-  return { ...mapping }
+export async function setUserSession(userId: string, sessionId: string): Promise<void> {
+  if(!userId || !sessionId) throw new Error('missing_params')
+  await prisma.session.upsert({
+    where: { sessionId },
+    update: { userId },
+    create: { sessionId, status: 'connecting', userId }
+  })
+}
+
+export async function ensureSessionStarted(userId: string): Promise<{ sessionId: string }> {
+  const sessionId = await getOrCreateUserSession(userId)
+  createOrLoadSession(sessionId).catch(()=>{})
+  return { sessionId }
+}
+
+// (Opcional) manter função de listagem antiga para debug, agora vinda do banco
+export async function listUserSessions(){
+  const sessions = await prisma.session.findMany({ select: { sessionId: true, userId: true, createdAt: true }, orderBy: { createdAt: 'desc' } })
+  const map: Record<string,string> = {}
+  sessions.forEach((s: { sessionId: string; userId: string | null }) => { if(s.userId && !(s.userId in map)) map[s.userId] = s.sessionId })
+  return map
 }

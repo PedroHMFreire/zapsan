@@ -13,7 +13,7 @@ import { canCreateSession, takeSendToken, snapshotRateState } from './rateLimit'
 import os from 'os'
 // fs/path já importados acima
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
-import { getOrCreateUserSession, ensureSessionStarted } from './userSessions'
+import { getOrCreateUserSession } from './userSessions'
 import { recordMessage, checkQuota, getUsage, getPlan } from './usage'
 import { prisma } from './db'
 
@@ -91,7 +91,7 @@ r.post('/auth/register', async (req: Request, res: Response) => {
       const code = out.error ? (map[out.error] || 400) : 400
       return res.status(code).json({ error: out.error || 'registration_failed' })
     }
-  const sessionId = getOrCreateUserSession(out.userId!)
+  const sessionId = await getOrCreateUserSession(out.userId!)
   // dispara inicialização (não aguarda) para já preparar QR se necessário
   createOrLoadSession(sessionId).catch(()=>{})
   res.cookie('uid', out.userId!, { httpOnly: true, sameSite: 'lax', secure: false })
@@ -120,7 +120,7 @@ r.post('/auth/login', async (req: Request, res: Response) => {
       // legacy fallback
       userId = legacyUser
     }
-  const sessionId = getOrCreateUserSession(userId)
+  const sessionId = await getOrCreateUserSession(userId)
   // garante que a sessão será criada/carregada no primeiro login (lazy fire & forget)
   createOrLoadSession(sessionId).catch(()=>{})
   res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false })
@@ -131,11 +131,11 @@ r.post('/auth/login', async (req: Request, res: Response) => {
 })
 
 // Retorna a sessão do usuário logado (por cookie ou query user)
-r.get('/me/session', (req: Request, res: Response) => {
+r.get('/me/session', async (req: Request, res: Response) => {
   try {
     const uid = (req.cookies?.uid) || String(req.query.user||'')
     if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-    const sessionId = getOrCreateUserSession(uid)
+    const sessionId = await getOrCreateUserSession(uid)
     res.json({ userId: uid, sessionId })
   } catch (err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
@@ -363,7 +363,7 @@ r.post('/messages/send', async (req: Request, res: Response) => {
     if (!to || !text) {
       return res.status(400).json({ error: 'bad_request', message: 'to e text são obrigatórios' })
     }
-    const session_id = getOrCreateUserSession(userId)
+  const session_id = await getOrCreateUserSession(userId)
     const quota = checkQuota(userId, session_id)
     if(!quota.ok){
       return res.status(429).json({ error: 'quota_exceeded', remaining: 0, plan: quota.plan })
@@ -389,10 +389,10 @@ r.post('/messages/send', async (req: Request, res: Response) => {
 })
 
 // === Perfil & sessão do usuário ===
-r.get('/me', (req: Request, res: Response) => {
+r.get('/me', async (req: Request, res: Response) => {
   const uid = (req.cookies?.uid) || ''
   if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-  const sessionId = getOrCreateUserSession(uid)
+  const sessionId = await getOrCreateUserSession(uid)
   res.json({ userId: uid, sessionId })
 })
 
@@ -400,7 +400,7 @@ r.get('/me/profile', async (req: Request, res: Response) => {
   try {
     const uid = (req.cookies?.uid) || ''
     if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-    const sessionId = getOrCreateUserSession(uid)
+  const sessionId = await getOrCreateUserSession(uid)
     const usage = getUsage(sessionId)
     const status = getSessionStatus(sessionId)
     // Tenta buscar perfil no Supabase (name, plan) se integração ativa
@@ -428,10 +428,10 @@ r.post('/me/logout', (req: Request, res: Response) => {
 })
 
 // Proxy de QR da sessão do usuário
-r.get('/me/session/qr', (req: Request, res: Response) => {
+r.get('/me/session/qr', async (req: Request, res: Response) => {
   const uid = (req.cookies?.uid) || ''
   if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-  const sessionId = getOrCreateUserSession(uid)
+  const sessionId = await getOrCreateUserSession(uid)
   const qr = getQR(sessionId)
   if(!qr) return res.status(404).json({ error: 'not_ready' })
   res.json({ dataUrl: qr })
@@ -441,7 +441,7 @@ r.post('/me/session/regen-qr', async (req: Request, res: Response) => {
   if(process.env.MANUAL_PAIRING !== '1') return res.status(400).json({ error: 'not_manual_mode' })
   const uid = (req.cookies?.uid) || ''
   if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-  const sessionId = getOrCreateUserSession(uid)
+  const sessionId = await getOrCreateUserSession(uid)
   try { await createOrLoadSession(sessionId) } catch {}
   res.json({ ok:true, regenerating:true })
 })
@@ -449,7 +449,7 @@ r.post('/me/session/regen-qr', async (req: Request, res: Response) => {
 r.post('/me/session/clean', async (req: Request, res: Response) => {
   const uid = (req.cookies?.uid) || ''
   if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-  const sessionId = getOrCreateUserSession(uid)
+  const sessionId = await getOrCreateUserSession(uid)
   const out = await cleanLogout(sessionId, { keepMessages: true })
   if(!out.ok) return res.status(404).json({ error: out.reason||'not_found' })
   res.json({ ok:true, cleaned:true })

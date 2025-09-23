@@ -42,18 +42,89 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createOrLoadSession = createOrLoadSession;
+exports.createIdleSession = createIdleSession;
 exports.getQR = getQR;
 exports.sendText = sendText;
+exports.sendMedia = sendMedia;
 exports.getStatus = getStatus;
+exports.getDebug = getDebug;
+exports.getAllSessionMeta = getAllSessionMeta;
+exports.cleanLogout = cleanLogout;
+exports.nukeAllSessions = nukeAllSessions;
+exports.getSessionStatus = getSessionStatus;
+exports.getMessages = getMessages;
+exports.onMessageStream = onMessageStream;
 const baileys_1 = __importStar(require("@whiskeysockets/baileys"));
 const pino_1 = __importDefault(require("pino"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const qrcode_1 = __importDefault(require("qrcode"));
+const messageStore_1 = require("./messageStore");
+const searchIndex_1 = require("./searchIndex");
+const realtime_1 = require("./realtime");
+const db_1 = require("./db");
+const events_1 = require("events");
 // Mantém comportamento antigo: pasta local "sessions".
-// Se quiser, pode definir SESS_DIR no Render sem quebrar local.
+// Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
 const SESS_DIR = process.env.SESS_DIR || path_1.default.resolve(process.cwd(), 'sessions');
+// Garante existência imediata do diretório raiz e reporta (útil para diagnosticar ENOENT / read-only FS)
+try {
+    fs_1.default.mkdirSync(SESS_DIR, { recursive: true });
+    // Log somente uma vez no boot
+    // (console.log usado em vez de logger interno para aparecer cedo no Render)
+    // eslint-disable-next-line no-console
+    console.log('[wa][init] SESS_DIR', SESS_DIR);
+}
+catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[wa][init][error_mkdir]', SESS_DIR, err?.message);
+}
+// Wrapper com retry para lidar com condição rara de ENOENT em init auth state (FS lento ou remoção concorrente)
+async function prepareAuthState(baseDir) {
+    let lastErr;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            ensureDir(baseDir);
+            const r = await (0, baileys_1.useMultiFileAuthState)(baseDir);
+            if (attempt > 1) {
+                // eslint-disable-next-line no-console
+                console.warn('[wa][authstate][recovered]', { baseDir, attempt });
+            }
+            return r;
+        }
+        catch (err) {
+            lastErr = err;
+            if (err?.code === 'ENOENT') {
+                // eslint-disable-next-line no-console
+                console.warn('[wa][authstate][retry]', { baseDir, attempt, code: err.code });
+                await new Promise(r => setTimeout(r, 50 * attempt));
+                continue;
+            }
+            break;
+        }
+    }
+    throw lastErr;
+}
 const sessions = new Map();
+const isManualMode = () => process.env.MANUAL_PAIRING === '1';
+const sessionState = new Map();
+const sessionMsgs = new Map();
+const sessionBus = new Map();
+function busFor(id) { let b = sessionBus.get(id); if (!b) {
+    b = new events_1.EventEmitter();
+    b.setMaxListeners(100);
+    sessionBus.set(id, b);
+} return b; }
+function pushMsg(sessionId, m) {
+    const buf = sessionMsgs.get(sessionId) || [];
+    buf.push(m);
+    if (buf.length > 5000)
+        buf.splice(0, buf.length - 5000);
+    sessionMsgs.set(sessionId, buf);
+    busFor(sessionId).emit('message', m);
+}
+// expõe no global opcionalmente (usado por getStatus se disponível)
+;
 global.sessions = global.sessions || sessions;
 const ensureDir = (dir) => {
     try {
@@ -67,6 +138,35 @@ const nukeDir = (dir) => {
     }
     catch { }
 };
+function loadMeta(baseDir) {
+    try {
+        const p = path_1.default.join(baseDir, 'meta.json');
+        const raw = fs_1.default.readFileSync(p, 'utf8');
+        return JSON.parse(raw);
+    }
+    catch {
+        return {};
+    }
+}
+function saveMeta(sess) {
+    if (!sess?.baseDir)
+        return;
+    try {
+        const p = path_1.default.join(sess.baseDir, 'meta.json');
+        const data = {
+            restartCount: sess.restartCount || 0,
+            criticalCount: sess.criticalCount || 0,
+            lastDisconnectCode: sess.lastDisconnectCode || null,
+            lastOpenAt: sess.lastOpenAt || null,
+            lastState: sess.lastState || null,
+            hasQR: !!sess.qrDataUrl,
+            updatedAt: Date.now()
+        };
+        fs_1.default.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+        sess.metaPersisted = true;
+    }
+    catch { }
+}
 // === API ORIGINAL ===
 // Dispara/recupera a sessão; não muda a assinatura original
 async function createOrLoadSession(sessionId) {
@@ -77,10 +177,63 @@ async function createOrLoadSession(sessionId) {
         return;
     const baseDir = path_1.default.join(SESS_DIR, sessionId);
     ensureDir(baseDir);
-    sessions.set(sessionId, { baseDir, starting: true, qr: null });
+    // Upsert Session no banco (status connecting)
+    try {
+        await db_1.prisma.session.upsert({
+            where: { sessionId },
+            update: { status: 'connecting' },
+            create: { sessionId, status: 'connecting' }
+        });
+    }
+    catch (err) {
+        console.warn('[wa][prisma][session_upsert][warn]', sessionId, err?.message);
+    }
+    // Hidratar histórico persistido (se ainda não carregado em sessionMsgs)
+    try {
+        if (!sessionMsgs.get(sessionId)) {
+            const dataFile = path_1.default.join(process.cwd(), 'data', 'messages', `${sessionId}.json`);
+            if (fs_1.default.existsSync(dataFile)) {
+                const raw = fs_1.default.readFileSync(dataFile, 'utf8');
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed.messages)) {
+                    const restored = parsed.messages.map((m) => ({
+                        id: String(m.id || ''),
+                        from: String(m.from || ''),
+                        to: m.to ? String(m.to) : undefined,
+                        text: m.text ? String(m.text) : '',
+                        fromMe: !!m.fromMe,
+                        timestamp: typeof m.timestamp === 'number' ? m.timestamp : Date.now()
+                    })).filter((x) => x.id && x.from);
+                    if (restored.length) {
+                        const MAX = 5000;
+                        const slice = restored.slice(-MAX);
+                        sessionMsgs.set(sessionId, slice);
+                        // Reindexar (best-effort)
+                        try {
+                            slice.forEach(r => { try {
+                                (0, searchIndex_1.indexMessage)({ id: r.id, from: r.from, to: r.to, text: r.text || '', timestamp: r.timestamp, fromMe: !!r.fromMe });
+                            }
+                            catch { } });
+                        }
+                        catch { }
+                        console.log('[wa][hydrate]', sessionId, { restored: slice.length });
+                    }
+                }
+            }
+        }
+    }
+    catch (err) {
+        console.warn('[wa][hydrate][error]', sessionId, err?.message);
+    }
+    // load persisted meta if exists
+    const meta = loadMeta(baseDir);
+    const manual = isManualMode();
+    sessions.set(sessionId, { baseDir, starting: true, startingSince: Date.now(), qr: null, restartCount: meta.restartCount || (current?.restartCount || 0), criticalCount: meta.criticalCount || (current?.criticalCount || 0), lastDisconnectCode: meta.lastDisconnectCode, lastOpenAt: meta.lastOpenAt, manualMode: manual });
+    sessionState.set(sessionId, 'connecting');
     const boot = async () => {
         const sess = sessions.get(sessionId);
-        const { state, saveCreds } = await (0, baileys_1.useMultiFileAuthState)(baseDir);
+        // Usa wrapper resiliente para reduzir risco de ENOENT inicial (principalmente em FS em rede ou após nukeDir simultâneo)
+        const { state, saveCreds } = await prepareAuthState(baseDir);
         // >>> Correção 1: usar sempre a versão correta do WhatsApp Web
         const { version } = await (0, baileys_1.fetchLatestBaileysVersion)();
         const sock = (0, baileys_1.default)({
@@ -89,24 +242,70 @@ async function createOrLoadSession(sessionId) {
             printQRInTerminal: false, // seu front já consome o QR
             browser: ['Ubuntu', 'Chrome', '121'],
             keepAliveIntervalMs: 30000,
-            syncFullHistory: false,
+            // Controlado por env: SYNC_FULL_HISTORY=1 para puxar histórico ao conectar
+            syncFullHistory: process.env.SYNC_FULL_HISTORY === '1',
             markOnlineOnConnect: false,
             logger: (0, pino_1.default)({ level: process.env.BAILEYS_LOG_LEVEL || 'warn' }),
         });
         sess.sock = sock;
         sess.starting = false;
         sess.qr = null;
+        if (!sess.messages)
+            sess.messages = [];
         sock.ev.on('creds.update', saveCreds);
         sock.ev.on('connection.update', async (u) => {
+            try {
+                console.log('[wa][update]', sessionId, { connection: u.connection, qr: !!u.qr, lastDisconnect: u?.lastDisconnect?.error?.message });
+            }
+            catch { }
             if (u.connection) {
                 sess.lastState = u.connection;
+                if (u.connection === 'open')
+                    sessionState.set(sessionId, 'open');
+                else if (u.connection === 'close')
+                    sessionState.set(sessionId, 'closed');
+                else if (u.connection === 'connecting')
+                    sessionState.set(sessionId, 'connecting');
             }
-            // transforma QR em dataURL para o endpoint /sessions/:id/qr
+            // QR handling
             if (u.qr) {
                 try {
                     const dataUrl = await qrcode_1.default.toDataURL(u.qr, { margin: 0 });
-                    sess.qr = dataUrl; // retrocompat
-                    sess.qrDataUrl = dataUrl;
+                    const changed = dataUrl !== sess.qrDataUrl;
+                    if (changed) {
+                        sess.qr = dataUrl;
+                        sess.qrDataUrl = dataUrl;
+                        sess.lastQRAt = Date.now();
+                        if (!sess.firstQRAt)
+                            sess.firstQRAt = sess.lastQRAt;
+                        sess.qrGenCount = (sess.qrGenCount || 0) + 1;
+                        if (sess.manualMode) {
+                            const grace = Number(process.env.SCAN_GRACE_MS || 25000);
+                            sess.scanGraceUntil = Date.now() + grace;
+                        }
+                        console.warn('[wa][qr][new]', sessionId, { qrGenCount: sess.qrGenCount, sinceFirstMs: sess.firstQRAt ? Date.now() - sess.firstQRAt : null, manual: !!sess.manualMode });
+                    }
+                    if (!sess.manualMode) {
+                        // Auto-reset condicional (apenas modo automático)
+                        const maxQrEnv = Number(process.env.QR_MAX_BEFORE_RESET || 8);
+                        const maxMsEnv = Number(process.env.QR_MAX_AGE_BEFORE_RESET || 120000);
+                        const autoResetEnabled = maxQrEnv > 0 && maxMsEnv > 0;
+                        if (autoResetEnabled && !sess.everOpened) {
+                            const tookTooMany = (sess.qrGenCount || 0) >= maxQrEnv;
+                            const tooOld = sess.firstQRAt && (Date.now() - sess.firstQRAt) > maxMsEnv;
+                            if (tookTooMany || tooOld) {
+                                console.warn('[wa][qr][auto-reset]', sessionId, { qrGenCount: sess.qrGenCount, msSinceFirst: sess.firstQRAt ? Date.now() - sess.firstQRAt : null, tookTooMany, tooOld });
+                                try {
+                                    nukeDir(sess.baseDir);
+                                }
+                                catch { }
+                                const restartCount = (sess.restartCount || 0) + 1;
+                                sessions.set(sessionId, { baseDir: sess.baseDir, starting: false, qr: null, lastState: 'restarting', restartCount, criticalCount: sess.criticalCount, qrDataUrl: null, nextRetryAt: Date.now() + 1500 });
+                                setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), 1500);
+                                return;
+                            }
+                        }
+                    }
                 }
                 catch {
                     sess.qr = null;
@@ -114,25 +313,213 @@ async function createOrLoadSession(sessionId) {
                 }
             }
             if (u.connection === 'open') {
+                // conectado: limpar QR
                 sess.qr = null;
                 sess.qrDataUrl = null;
+                sess.criticalCount = 0;
+                sess.lastOpenAt = Date.now();
+                sess.everOpened = true;
+                saveMeta(sess);
+                // atualizar status no banco
+                try {
+                    await db_1.prisma.session.update({ where: { sessionId }, data: { status: 'open' } });
+                }
+                catch (e) {
+                    console.warn('[wa][prisma][session_status_open][warn]', sessionId, e?.message);
+                }
             }
             if (u.connection === 'close') {
                 const code = u.lastDisconnect?.error?.output?.statusCode ||
                     u.lastDisconnect?.error?.status || 0;
+                sess.lastDisconnectCode = code;
+                saveMeta(sess);
                 const isStreamErrored = code === 515 || u.lastDisconnect?.error?.message?.includes('Stream Errored');
                 const isLoggedOut = code === 401 ||
                     u.lastDisconnect?.error?.output?.statusCode === baileys_1.DisconnectReason.loggedOut;
                 // >>> Correção 2: em 515/401, resetar credenciais e re-parear
-                if (isStreamErrored || isLoggedOut) {
-                    nukeDir(baseDir); // limpa a sessão corrompida
-                    sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'restarting', qrDataUrl: null });
-                    setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), 1500);
+                if (!sess.manualMode && (isStreamErrored || isLoggedOut)) {
+                    const crit = (sess.criticalCount || 0) + 1;
+                    sess.criticalCount = crit;
+                    // base backoff exponencial simples: 3s * 2^(crit-1), cap 30s
+                    let base = Math.min(30000, 3000 * Math.pow(2, Math.max(0, crit - 1)));
+                    // jitter 0–25%
+                    const delay = Math.round(base * (1 + Math.random() * 0.25));
+                    // Heurística: se NUNCA abriu (sem everOpened) e já deu 2x 515 -> nuke para forçar QR totalmente novo
+                    const neverOpened = !sess.everOpened;
+                    const shouldNuke = isLoggedOut || crit >= 3 || (neverOpened && crit >= 2) || crit > 6;
+                    console.warn('[wa][disconnect-critical]', sessionId, { code, crit, delay, everOpened: !!sess.everOpened, willNuke: shouldNuke });
+                    if (shouldNuke) {
+                        try {
+                            nukeDir(baseDir);
+                        }
+                        catch { }
+                    }
+                    const restartCount = (sess.restartCount || 0) + 1;
+                    sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'restarting', qrDataUrl: sess.qrDataUrl || null, restartCount, criticalCount: sess.criticalCount, nextRetryAt: Date.now() + delay, lastDisconnectCode: sess.lastDisconnectCode, lastOpenAt: sess.lastOpenAt, everOpened: sess.everOpened });
+                    const ns = sessions.get(sessionId);
+                    if (ns)
+                        saveMeta(ns);
+                    setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), delay);
                     return;
                 }
                 // outros motivos (timeout, rede etc) → tenta reconectar preservando auth
-                sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null });
-                setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), 1500);
+                // reconexão leve (rede): manter QR se ainda não conectou / útil para pairing
+                if (!sess.manualMode) {
+                    const lightDelay = 10000;
+                    const restartCount = (sess.restartCount || 0) + 1;
+                    sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'reconnecting', qrDataUrl: sess.qrDataUrl || null, restartCount, criticalCount: sess.criticalCount || 0, nextRetryAt: Date.now() + lightDelay, lastDisconnectCode: sess.lastDisconnectCode, lastOpenAt: sess.lastOpenAt });
+                    const ns = sessions.get(sessionId);
+                    if (ns)
+                        saveMeta(ns);
+                    setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), lightDelay);
+                }
+                else {
+                    // Modo manual: não reconectar automaticamente
+                    sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'waiting_manual_retry', qrDataUrl: null, restartCount: sess.restartCount, criticalCount: sess.criticalCount, lastDisconnectCode: sess.lastDisconnectCode, manualMode: true });
+                }
+                // persistir status closed
+                try {
+                    await db_1.prisma.session.update({ where: { sessionId }, data: { status: 'closed' } });
+                }
+                catch (e) { /* silencioso */ }
+            }
+        });
+        // Listener principal de mensagens
+        sock.ev.on('messages.upsert', async ({ messages }) => {
+            if (!messages?.length)
+                return;
+            for (const m of messages) {
+                try {
+                    const id = m.key?.id || String(Date.now());
+                    const from = m.key?.remoteJid || '';
+                    const fromMe = !!m.key?.fromMe;
+                    const text = m.message?.conversation
+                        || m.message?.extendedTextMessage?.text
+                        || m.message?.imageMessage?.caption
+                        || m.message?.videoMessage?.caption
+                        || '';
+                    const to = fromMe ? (m.key?.participant || from) : undefined;
+                    // Baileys timestamp vem em segundos (normalmente). Convertemos para ms apenas se parecer razoável.
+                    let tsRaw = m.messageTimestamp ? Number(m.messageTimestamp) : (Date.now() / 1000);
+                    if (tsRaw < 10000000000) { // heurística: se ainda em segundos
+                        tsRaw = tsRaw * 1000;
+                    }
+                    const ts = Math.floor(tsRaw);
+                    const msgObj = { id, from, to, text, fromMe, timestamp: ts };
+                    pushMsg(sessionId, msgObj);
+                    // Persistir em disco e indexar para busca/histórico
+                    try {
+                        (0, messageStore_1.appendMessage)(sessionId, { ...msgObj, text, fromMe });
+                    }
+                    catch { }
+                    try {
+                        (0, searchIndex_1.indexMessage)({ id, from, to, text, timestamp: ts, fromMe });
+                    }
+                    catch { }
+                    // Persistir em Postgres
+                    try {
+                        const waMsgId = id;
+                        const jid = from;
+                        const body = text || null;
+                        // Converte timestamp ms para Date
+                        const tsDate = new Date(ts);
+                        await db_1.prisma.message.create({
+                            data: {
+                                session: { connect: { sessionId } },
+                                jid,
+                                waMsgId,
+                                fromMe,
+                                body,
+                                timestamp: tsDate,
+                                raw: m
+                            }
+                        });
+                    }
+                    catch (e) {
+                        // Evitar spam massivo: log só mensagem resumida
+                        if (!/Unique constraint|Foreign key/.test(e?.message || '')) {
+                            console.warn('[wa][prisma][message_create][warn]', sessionId, e?.message);
+                        }
+                    }
+                }
+                catch (err) {
+                    try {
+                        console.warn('[wa][messages.upsert][err]', sessionId, err && err.message);
+                    }
+                    catch { }
+                }
+            }
+        });
+        // Atualizações de status de mensagens (ex: recebida, lida)
+        sock.ev.on('messages.update', (updates) => {
+            for (const u of updates) {
+                try {
+                    const status = (u.update.status !== undefined) ? String(u.update.status) : undefined;
+                    if (status) {
+                        (0, messageStore_1.updateMessageStatus)(sessionId, u.key.id, status);
+                        (0, realtime_1.broadcast)(sessionId, 'message_status', { id: u.key.id, status });
+                    }
+                    console.log('[wa][msg.update]', sessionId, u.key.id, status);
+                }
+                catch { }
+            }
+        });
+        // Recebidos indicadores de recibo (delivered/read)
+        sock.ev.on('message-receipt.update', (receipts) => {
+            try {
+                console.log('[wa][receipt]', sessionId, receipts.length);
+            }
+            catch { }
+        });
+        // Atualizações de chats (metadados) - útil para depuração
+        sock.ev.on('chats.upsert', (chats) => {
+            try {
+                console.log('[wa][chats.upsert]', sessionId, chats.length);
+            }
+            catch { }
+        });
+        sock.ev.on('contacts.upsert', async (cts) => {
+            try {
+                console.log('[wa][contacts.upsert]', sessionId, cts.length);
+            }
+            catch { }
+            try {
+                for (const c of cts) {
+                    try {
+                        await db_1.prisma.contact.upsert({
+                            where: { sessionId_jid: { sessionId, jid: c.id } },
+                            update: { name: c.notify || c.name || null, isGroup: false },
+                            create: { session: { connect: { sessionId } }, jid: c.id, name: c.notify || c.name || null, isGroup: false }
+                        });
+                    }
+                    catch (e) { /* ignorar individuais */ }
+                }
+            }
+            catch (e) {
+                console.warn('[wa][prisma][contacts_upsert][warn]', sessionId, e?.message);
+            }
+        });
+        sock.ev.on('chats.set', async (payload) => {
+            const chats = payload?.chats || [];
+            try {
+                console.log('[wa][chats.set]', sessionId, chats.length);
+            }
+            catch { }
+            try {
+                for (const ch of chats) {
+                    const isGroup = ch?.id?.endsWith?.('@g.us');
+                    try {
+                        await db_1.prisma.contact.upsert({
+                            where: { sessionId_jid: { sessionId, jid: ch.id } },
+                            update: { name: ch.name || ch.id, isGroup },
+                            create: { session: { connect: { sessionId } }, jid: ch.id, name: ch.name || ch.id, isGroup }
+                        });
+                    }
+                    catch (e) { /* ignorar individuais */ }
+                }
+            }
+            catch (e) {
+                console.warn('[wa][prisma][chats_set][warn]', sessionId, e?.message);
             }
         });
     };
@@ -140,10 +527,27 @@ async function createOrLoadSession(sessionId) {
         sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'error_init', qrDataUrl: null });
     });
 }
+// Cria sessão em estado idle (apenas se não existir) - usado em modo manual
+function createIdleSession(sessionId) {
+    if (!sessionId)
+        throw new Error('session_id_required');
+    const existing = sessions.get(sessionId);
+    if (existing)
+        return { ok: true, existed: true };
+    const baseDir = path_1.default.join(SESS_DIR, sessionId);
+    ensureDir(baseDir);
+    sessions.set(sessionId, { baseDir, manualMode: true, lastState: 'idle', messages: [] });
+    return { ok: true, existed: false };
+}
 // === API ORIGINAL ===
 function getQR(sessionId) {
     const s = sessions.get(sessionId);
-    return s?.qr || null;
+    // Enquanto estiver em processos de conexão/reconexão, devolver último QR disponível
+    if (!s)
+        return null;
+    if (s.qr)
+        return s.qr;
+    return null;
 }
 // === API ORIGINAL ===
 async function sendText(sessionId, to, text) {
@@ -155,10 +559,158 @@ async function sendText(sessionId, to, text) {
         : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
     await s.sock.sendMessage(jid, { text });
 }
+// Envio de mídia genérico
+async function sendMedia(sessionId, to, filePath, options) {
+    const s = sessions.get(sessionId);
+    if (!s?.sock)
+        throw new Error('session_not_found');
+    const jid = to.includes('@s.whatsapp.net') || to.includes('@g.us')
+        ? to
+        : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
+    const buffer = fs_1.default.readFileSync(filePath);
+    // Heurística simples de tipo
+    const mime = options.mimetype || require('mime-types').lookup(filePath) || 'application/octet-stream';
+    let message = { caption: options.caption };
+    if (mime.startsWith('image/'))
+        message.image = buffer;
+    else if (mime.startsWith('video/'))
+        message.video = buffer;
+    else if (mime.startsWith('audio/'))
+        message.audio = buffer;
+    else if (mime === 'image/webp')
+        message.sticker = buffer;
+    else
+        message.document = buffer, message.mimetype = mime, message.fileName = path_1.default.basename(filePath);
+    await s.sock.sendMessage(jid, message);
+}
 // Novo: estado resumido da sessão
 function getStatus(sessionId) {
     // tenta global.sessoes se existir, depois fallback local
     const globalSessions = global.sessions;
     const s = globalSessions?.get?.(sessionId) ?? sessions.get(sessionId);
     return { state: s?.lastState ?? 'unknown', hasQR: !!s?.qrDataUrl };
+}
+function getDebug(sessionId) {
+    const s = sessions.get(sessionId);
+    if (!s)
+        return { exists: false };
+    const maxQrEnv = Number(process.env.QR_MAX_BEFORE_RESET || 8);
+    const maxMsEnv = Number(process.env.QR_MAX_AGE_BEFORE_RESET || 120000);
+    const autoResetEnabled = maxQrEnv > 0 && maxMsEnv > 0;
+    const scanGraceRemaining = s.scanGraceUntil ? Math.max(0, s.scanGraceUntil - Date.now()) : null;
+    return {
+        exists: true,
+        state: s.lastState,
+        hasQR: !!s.qrDataUrl,
+        lastQRAt: s.lastQRAt,
+        msSinceLastQR: s.lastQRAt ? Date.now() - s.lastQRAt : null,
+        firstQRAt: s.firstQRAt || null,
+        msSinceFirstQR: s.firstQRAt ? Date.now() - s.firstQRAt : null,
+        qrGenCount: s.qrGenCount || 0,
+        starting: !!s.starting,
+        startingSince: s.startingSince,
+        msStarting: s.startingSince ? Date.now() - s.startingSince : null,
+        lastDisconnectCode: s.lastDisconnectCode,
+        restartCount: s.restartCount || 0,
+        criticalCount: s.criticalCount || 0,
+        nextRetryAt: s.nextRetryAt || null,
+        msUntilRetry: s.nextRetryAt ? Math.max(0, s.nextRetryAt - Date.now()) : null,
+        lastOpenAt: s.lastOpenAt || null,
+        autoResetEnabled,
+        qrMaxBeforeReset: maxQrEnv,
+        qrMaxAgeMsBeforeReset: maxMsEnv,
+        manualMode: !!s.manualMode,
+        scanGraceUntil: s.scanGraceUntil || null,
+        scanGraceRemaining,
+    };
+}
+// Expor mensagens recentes (em memória)
+// (mantido por compat interna) mensagens antigas em memória curta
+function getMessagesLegacy(sessionId, limit = 100) {
+    const s = sessions.get(sessionId);
+    if (!s?.messages)
+        return [];
+    return s.messages.slice(-limit);
+}
+// List meta for all sessions (for metrics)
+function getAllSessionMeta() {
+    const out = {};
+    for (const [id, s] of sessions.entries()) {
+        out[id] = {
+            state: s.lastState || 'unknown',
+            restartCount: s.restartCount || 0,
+            criticalCount: s.criticalCount || 0,
+            lastDisconnectCode: s.lastDisconnectCode || null,
+            lastOpenAt: s.lastOpenAt || null,
+            hasQR: !!s.qrDataUrl,
+            messagesInMemory: s.messages?.length || 0
+        };
+    }
+    return out;
+}
+// Efetua logout (se possível) e remove credenciais para forçar novo pareamento limpo
+async function cleanLogout(sessionId, { keepMessages = false } = {}) {
+    const sess = sessions.get(sessionId);
+    if (!sess)
+        return { ok: false, reason: 'not_found' };
+    try {
+        if (sess.sock) {
+            try {
+                await sess.sock.logout?.();
+            }
+            catch { }
+            try {
+                sess.sock.ws.close();
+            }
+            catch { }
+        }
+    }
+    catch { }
+    // Remover diretório de credenciais
+    try {
+        nukeDir(sess.baseDir);
+    }
+    catch { }
+    // Preservar mensagens em memória opcionalmente
+    const preservedMsgs = keepMessages ? (sess.messages ? [...sess.messages] : []) : undefined;
+    sessions.delete(sessionId);
+    if (keepMessages) {
+        // Recria placeholder da sessão somente com mensagens preservadas (sem sock)
+        sessions.set(sessionId, { baseDir: path_1.default.join(SESS_DIR, sessionId), messages: preservedMsgs });
+    }
+    return { ok: true };
+}
+// Remove TODAS as sessões (memória + diretórios). Uso cuidadoso.
+function nukeAllSessions() {
+    for (const [id, s] of Array.from(sessions.entries())) {
+        try {
+            s.sock?.logout?.();
+        }
+        catch { }
+        try {
+            s.sock?.ws.close();
+        }
+        catch { }
+        try {
+            nukeDir(s.baseDir);
+        }
+        catch { }
+        sessions.delete(id);
+    }
+    return { ok: true };
+}
+// ==== Novos helpers públicos solicitados ====
+function getSessionStatus(sessionId) {
+    return { state: sessionState.get(sessionId) || 'closed' };
+}
+function getMessages(sessionId, limit = 500) {
+    const all = sessionMsgs.get(sessionId) || [];
+    const n = Math.max(1, Math.min(5000, Number(limit) || 500));
+    return all.slice(-n);
+}
+function onMessageStream(sessionId, cb) {
+    const b = busFor(sessionId);
+    const fn = (m) => cb(m);
+    b.on('message', fn);
+    return () => b.off('message', fn);
 }
