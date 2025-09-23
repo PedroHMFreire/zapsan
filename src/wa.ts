@@ -18,7 +18,7 @@ import QRCode from 'qrcode'
 import { appendMessage, updateMessageStatus } from './messageStore'
 import { indexMessage } from './searchIndex'
 import { broadcast } from './realtime'
-import { prisma } from './db'
+import { supa } from './db'
 import http from 'http'
 import https from 'https'
 import { EventEmitter } from 'events'
@@ -158,14 +158,14 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
   const baseDir = path.join(SESS_DIR, sessionId)
   ensureDir(baseDir)
-  // Upsert Session no banco (status connecting)
+  // Upsert sessão status connecting via Supabase
   try {
-    await prisma.session.upsert({
-      where: { sessionId },
-      update: { status: 'connecting' },
-      create: { sessionId, status: 'connecting' }
-    })
-  } catch (err:any) { console.warn('[wa][prisma][session_upsert][warn]', sessionId, err?.message) }
+    const { error } = await supa.from('sessions').upsert(
+      { session_id: sessionId, status: 'connecting' },
+      { onConflict: 'session_id' }
+    )
+    if(error) console.warn('[wa][supa][session_upsert_connecting][warn]', sessionId, error.message)
+  } catch (err:any) { console.warn('[wa][supa][session_upsert_connecting][catch]', sessionId, err?.message) }
   // Hidratar histórico persistido (se ainda não carregado em sessionMsgs)
   try {
     if(!sessionMsgs.get(sessionId)){
@@ -284,7 +284,13 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         sess.everOpened = true
         saveMeta(sess)
         // atualizar status no banco
-        try { await prisma.session.update({ where: { sessionId }, data: { status: 'open' } }) } catch(e:any){ console.warn('[wa][prisma][session_status_open][warn]', sessionId, e?.message) }
+        try {
+          const { error } = await supa.from('sessions').upsert(
+            { session_id: sessionId, status: 'open' },
+            { onConflict: 'session_id' }
+          )
+          if(error) console.warn('[wa][supa][session_status_open][warn]', sessionId, error.message)
+        } catch(e:any){ console.warn('[wa][supa][session_status_open][catch]', sessionId, e?.message) }
       }
 
       if (u.connection === 'close') {
@@ -338,7 +344,13 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: 'waiting_manual_retry', qrDataUrl: null, restartCount: sess.restartCount, criticalCount: sess.criticalCount, lastDisconnectCode: sess.lastDisconnectCode, manualMode: true })
         }
         // persistir status closed
-        try { await prisma.session.update({ where: { sessionId }, data: { status: 'closed' } }) } catch(e:any){ /* silencioso */ }
+        try {
+          const { error } = await supa.from('sessions').upsert(
+            { session_id: sessionId, status: 'closed' },
+            { onConflict: 'session_id' }
+          )
+          if(error) console.warn('[wa][supa][session_status_closed][warn]', sessionId, error.message)
+        } catch(e:any){ /* silencioso */ }
       }
     })
 
@@ -374,17 +386,21 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
             const body = text || null
             // Converte timestamp ms para Date
             const tsDate = new Date(ts)
-            await prisma.message.create({
-              data: {
-                session: { connect: { sessionId } },
-                jid,
-                waMsgId,
-                fromMe,
-                body,
-                timestamp: tsDate,
-                raw: m as any
-              }
+            // Supabase insert de mensagem
+            const { error: msgErr } = await supa.from('messages').insert({
+              session_key: sessionId,
+              jid,
+              wa_msg_id: waMsgId,
+              from_me: fromMe,
+              body: body,
+              timestamp: tsDate,
+              raw: m as any
             })
+            if(msgErr){
+              if(!/duplicate|unique/i.test(msgErr.message)){
+                console.warn('[wa][supa][message_insert][warn]', sessionId, msgErr.message)
+              }
+            }
           } catch (e:any) {
             // Evitar spam massivo: log só mensagem resumida
             if(!/Unique constraint|Foreign key/.test(e?.message||'')){
@@ -425,11 +441,11 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
       try {
         for(const c of cts){
           try {
-            await prisma.contact.upsert({
-              where: { sessionId_jid: { sessionId, jid: c.id } },
-              update: { name: (c as any).notify || (c as any).name || null, isGroup: false },
-              create: { session: { connect: { sessionId } }, jid: c.id, name: (c as any).notify || (c as any).name || null, isGroup: false }
-            })
+            const { error: cErr } = await supa.from('contacts').upsert(
+              { session_key: sessionId, jid: c.id, name: (c as any).notify || (c as any).name || null, is_group: false },
+              { onConflict: 'session_key,jid' }
+            )
+            if(cErr) {/* silencioso por item */}
           } catch (e:any){ /* ignorar individuais */ }
         }
       } catch (e:any){ console.warn('[wa][prisma][contacts_upsert][warn]', sessionId, e?.message) }
@@ -442,11 +458,11 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
         for(const ch of chats){
           const isGroup = ch?.id?.endsWith?.('@g.us')
             try {
-              await prisma.contact.upsert({
-                where: { sessionId_jid: { sessionId, jid: ch.id } },
-                update: { name: ch.name || ch.id, isGroup },
-                create: { session: { connect: { sessionId } }, jid: ch.id, name: ch.name || ch.id, isGroup }
-              })
+              const { error: cErr } = await supa.from('contacts').upsert(
+                { session_key: sessionId, jid: ch.id, name: ch.name || ch.id, is_group: isGroup },
+                { onConflict: 'session_key,jid' }
+              )
+              if(cErr){ /* ignorar individuais */ }
             } catch (e:any){ /* ignorar individuais */ }
         }
       } catch (e:any){ console.warn('[wa][prisma][chats_set][warn]', sessionId, e?.message) }

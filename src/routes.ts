@@ -15,7 +15,8 @@ import os from 'os'
 import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
 import { getOrCreateUserSession } from './userSessions'
 import { recordMessage, checkQuota, getUsage, getPlan } from './usage'
-import { prisma } from './db'
+import { supa } from './db'
+import bcrypt from 'bcrypt'
 import { setUserSession, ensureSessionStarted } from './userSessions'
 import { hasSupabaseEnv } from './supabase'
 
@@ -89,63 +90,61 @@ r.get('/debug/auth-env', (_req: Request, res: Response) => {
 // === Auth & sessão por usuário ===
 // /auth/register: cria novo usuário; /auth/login: apenas autentica (sem auto-criação) ou aceita legacy { user }
 
+// Novo registro baseado em phone + password (substitui fluxo anterior)
 r.post('/auth/register', async (req: Request, res: Response) => {
   try {
-    const name = String(req.body?.name||'').trim()
-    const emailRaw = String(req.body?.email||'').trim().toLowerCase()
+    const phone = String(req.body?.phone||'').trim()
+    const name = req.body?.name ? String(req.body.name).trim() : ''
     const password = String(req.body?.password||'')
-    const confirm = String(req.body?.confirm||'')
-    if(!emailRaw || !password) return res.status(400).json({ error: 'missing_fields' })
+    if(!phone || !password) return res.status(400).json({ error: 'missing_fields' })
     if(password.length < 6) return res.status(400).json({ error: 'weak_password' })
-    if(password !== confirm) return res.status(400).json({ error: 'password_mismatch' })
-    const out = await registerUser(name, emailRaw, password)
-    if(!out.ok){
-      const map: Record<string, number> = { user_exists: 409, supabase_signup_failed: 502 }
-      const code = out.error ? (map[out.error] || 400) : 400
-      return res.status(code).json({ error: out.error || 'registration_failed' })
+    const hash = await bcrypt.hash(String(password), 10)
+    const { data, error } = await supa.from('users').upsert(
+      { phone: phone, name: name || null, passwordHash: hash },
+      { onConflict: 'phone' }
+    ).select('id, phone, name').single()
+    if(error){
+      // tentativa de detectar conflito - Supabase retorna 23505 (unique violation) no Postgres
+      const msg = error.message || ''
+      if(/duplicate|unique|23505/i.test(msg)){
+        return res.status(409).json({ error: 'user_exists' })
+      }
+      return res.status(500).json({ error: 'registration_failed', detail: msg })
     }
-  const sessionId = await getOrCreateUserSession(out.userId!)
-  // dispara inicialização (não aguarda) para já preparar QR se necessário
-  createOrLoadSession(sessionId).catch(()=>{})
-  res.cookie('uid', out.userId!, { httpOnly: true, sameSite: 'lax', secure: false })
-  res.status(201).json({ ok:true, userId: out.userId, sessionId, created: out.created, sessionBoot: true })
+    if(!data){
+      return res.status(500).json({ error: 'registration_failed' })
+    }
+    const userId = data.id
+    const sessionId = await getOrCreateUserSession(userId)
+    createOrLoadSession(sessionId).catch(()=>{})
+    res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false })
+    return res.status(201).json({ ok:true, user: data, sessionId })
   } catch(err:any){
-    res.status(500).json({ error: 'internal_error', message: err?.message })
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
+// Login baseado em phone + password
 r.post('/auth/login', async (req: Request, res: Response) => {
   try {
-    const legacyUser = String(req.body?.user||'').trim()
-    const emailRaw = String(req.body?.email||'').trim().toLowerCase()
+    const phone = String(req.body?.phone||'').trim()
     const password = String(req.body?.password||'')
-    if(!emailRaw && !legacyUser) return res.status(400).json({ error: 'missing_credentials' })
-    let userId = ''
-    if(emailRaw){
-      const out = await loginUser(emailRaw, password)
-      if(!out.ok){
-        const map: Record<string, number> = {
-          invalid_credentials: 401,
-          supabase_login_failed: 502,
-          supabase_config_error: 500,
-          supabase_network_error: 503,
-          supabase_unavailable: 503
-        }
-        const code = out.error ? (map[out.error] || 400) : 400
-        return res.status(code).json({ error: out.error || 'login_failed' })
-      }
-      userId = out.userId!
-    } else {
-      // legacy fallback
-      userId = legacyUser
+    if(!phone || !password) return res.status(400).json({ error: 'missing_credentials' })
+    const { data: u, error } = await supa.from('users')
+      .select('id, phone, name, passwordHash')
+      .eq('phone', phone)
+      .single()
+    if(error || !u || !u.passwordHash){
+      return res.status(401).json({ error: 'invalid_credentials' })
     }
-  const sessionId = await getOrCreateUserSession(userId)
-  // garante que a sessão será criada/carregada no primeiro login (lazy fire & forget)
-  createOrLoadSession(sessionId).catch(()=>{})
-  res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false })
-  res.json({ ok:true, userId, sessionId, sessionBoot: true })
+    const ok = await bcrypt.compare(String(password), u.passwordHash)
+    if(!ok) return res.status(401).json({ error: 'invalid_credentials' })
+    const sessionId = await getOrCreateUserSession(u.id)
+    createOrLoadSession(sessionId).catch(()=>{})
+    res.cookie('uid', u.id, { httpOnly: true, sameSite: 'lax', secure: false })
+    return res.json({ ok:true, user: { id: u.id, phone: u.phone, name: u.name }, sessionId, sessionBoot: true })
   } catch(err:any){
-    res.status(500).json({ error: 'internal_error', message: err?.message })
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
@@ -285,37 +284,28 @@ r.get('/sessions/:id/qr', async (req: Request, res: Response) => {
 
 // === DB-backed endpoints (Prisma) ===
 // Upsert básico de usuário por phone (unique). Body: { phone, name? }
+// Upsert básico de usuário (sem senha) via Supabase
 r.post('/users', async (req: Request, res: Response) => {
   try {
     const phone = String(req.body?.phone||'').trim()
-    const name = req.body?.name ? String(req.body.name).trim() : undefined
-    const password = req.body?.password ? String(req.body.password) : ''
+    const name = req.body?.name ? String(req.body.name).trim() : null
     if(!phone) return res.status(400).json({ error: 'bad_request', message: 'phone obrigatório' })
-    if(password){
-      // cria usuário com senha (usa createUser -> prisma via users.ts)
-      // createUser espera phone e password (adaptando assinatura conforme implementação atual)
-      // Se já existir, retornará erro user_exists; nesse caso fazemos fallback para login implícito.
-      try {
-        const created = await createUser({ phone, password, name })
-        return res.status(201).json({ ok:true, user: created })
-      } catch(err:any){
-        if(err?.code === 'user_exists'){
-          // tentar recuperar
-          const existing = await prisma.user.findUnique({ where: { phone } })
-          return res.json({ ok:true, user: existing })
-        }
-        return res.status(500).json({ error: 'internal_error', message: err?.message })
+    const { data, error } = await supa.from('users').upsert(
+      { phone, name },
+      { onConflict: 'phone' }
+    ).select('id, phone, name').single()
+    if(error){
+      const msg = error.message || ''
+      if(/duplicate|unique|23505/i.test(msg)){
+        // Buscar existente
+        const { data: existing } = await supa.from('users').select('id, phone, name').eq('phone', phone).single()
+        return res.json({ ok:true, user: existing })
       }
-    } else {
-      const user = await prisma.user.upsert({
-        where: { phone },
-        update: name ? { name } : {},
-        create: { phone, name }
-      })
-      return res.status(201).json({ ok:true, user })
+      return res.status(500).json({ error: 'internal_error', detail: msg })
     }
+    return res.status(201).json({ ok:true, user: data })
   } catch(err:any){
-    res.status(500).json({ error: 'internal_error', message: err?.message })
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
@@ -348,8 +338,12 @@ r.get('/users/:id/sessions', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     if(!id) return res.status(400).json({ error: 'missing_id' })
-    const sessions = await prisma.session.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' } })
-    res.json({ sessions })
+    const { data, error } = await supa.from('sessions')
+      .select('*')
+      .eq('user_id', id)
+      .order('created_at', { ascending: false })
+    if(error) return res.status(500).json({ error: 'internal_error', detail: error.message })
+    res.json({ sessions: data || [] })
   } catch(err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -359,13 +353,12 @@ r.get('/users/:id/sessions', async (req: Request, res: Response) => {
 // Query params: limit (default 50, max 200), before (timestamp ISO ou epoch ms) para paginação
 r.get('/sessions/:id/messages/db', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params // id aqui é session.sessionId lógico
+    const { id } = req.params
     const limitRaw = Number(req.query.limit || 50)
     const limit = isNaN(limitRaw) ? 50 : Math.min(Math.max(limitRaw, 1), 200)
     const beforeRaw = String(req.query.before||'').trim()
     let beforeDate: Date | undefined
     if(beforeRaw){
-      // tenta parse epoch
       const asNum = Number(beforeRaw)
       if(!isNaN(asNum) && asNum > 0){
         beforeDate = new Date(asNum)
@@ -374,41 +367,39 @@ r.get('/sessions/:id/messages/db', async (req: Request, res: Response) => {
         if(!isNaN(d.getTime())) beforeDate = d
       }
     }
-    // Recupera Session.id interno a partir de sessionId lógico
-    const session = await prisma.session.findUnique({ where: { sessionId: id }, select: { id: true } })
-    if(!session) return res.status(404).json({ error: 'session_not_found' })
-    const where: any = { sessionId: session.id }
+    // Busca mensagens direto por session_key
+    let query = supa.from('messages')
+      .select('*')
+      .eq('session_key', id)
+      .order('timestamp', { ascending: false })
+      .limit(limit)
     if(beforeDate){
-      where.timestamp = { lt: beforeDate }
+      query = query.lt('timestamp', beforeDate.toISOString())
     }
-    const messages = await prisma.message.findMany({
-      where,
-      orderBy: { timestamp: 'desc' },
-      take: limit,
-    })
-    // Próximo cursor é o menor timestamp retornado (para continuar paginação)
+    const { data, error } = await query
+    if(error) return res.status(500).json({ error: 'internal_error', detail: error.message })
     let nextCursor: string | null = null
-    if(messages.length === limit){
-      const last = messages[messages.length - 1]
-      nextCursor = last.timestamp.toISOString()
+    if(data && data.length === limit){
+      const last = data[data.length - 1]
+      if(last?.timestamp) nextCursor = last.timestamp
     }
-    res.json({ messages, nextCursor, pageSize: messages.length })
+    res.json({ messages: data||[], nextCursor, pageSize: data?.length||0 })
   } catch(err:any){
-    res.status(500).json({ error: 'internal_error', message: err?.message })
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
 // Lista contatos de uma sessão persistidos
 r.get('/sessions/:id/contacts', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params // sessionId lógico
-    const session = await prisma.session.findUnique({ where: { sessionId: id }, select: { id: true } })
-    if(!session) return res.status(404).json({ error: 'session_not_found' })
-    const contacts = await prisma.contact.findMany({
-      where: { sessionId: session.id },
-      orderBy: [ { name: 'asc' }, { jid: 'asc' } ]
-    })
-    res.json({ contacts })
+    const { id } = req.params
+    const { data, error } = await supa.from('contacts')
+      .select('*')
+      .eq('session_key', id)
+      .order('name', { ascending: true })
+      .order('jid', { ascending: true })
+    if(error) return res.status(500).json({ error: 'internal_error', detail: error.message })
+    res.json({ contacts: data||[] })
   } catch(err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -461,16 +452,17 @@ r.get('/me/profile', async (req: Request, res: Response) => {
     const sessionQuery = String(req.query.session_id||'').trim()
     if(sessionQuery){
       // Perfil baseado em session_id direto
-      const session = await prisma.session.findUnique({
-        where: { sessionId: sessionQuery },
-        include: { user: true }
-      })
-      if(!session) return res.status(404).json({ error: 'not_found' })
-      return res.json({
-        sessionId: session.sessionId,
-        status: session.status,
-        user: session.user ? { id: session.user.id, phone: session.user.phone, name: session.user.name } : null
-      })
+      const { data: s, error: sErr } = await supa.from('sessions')
+        .select('*')
+        .eq('session_id', sessionQuery)
+        .single()
+      if(sErr || !s) return res.status(404).json({ error: 'not_found' })
+      let userData: any = null
+      if(s.user_id){
+        const { data: usr } = await supa.from('users').select('id, phone, name').eq('id', s.user_id).single()
+        if(usr) userData = usr
+      }
+      return res.json({ sessionId: s.session_id, status: s.status, user: userData })
     }
     // Fluxo anterior (cookie uid)
     const uid = (req.cookies?.uid) || ''
