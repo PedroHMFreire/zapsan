@@ -16,6 +16,7 @@ import { loadKnowledge, selectSections, updateKnowledge } from './knowledge'
 import { getOrCreateUserSession } from './userSessions'
 import { recordMessage, checkQuota, getUsage, getPlan } from './usage'
 import { prisma } from './db'
+import { setUserSession, ensureSessionStarted } from './userSessions'
 
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -270,16 +271,57 @@ r.post('/users', async (req: Request, res: Response) => {
   try {
     const phone = String(req.body?.phone||'').trim()
     const name = req.body?.name ? String(req.body.name).trim() : undefined
-    if(!phone) return res.status(400).json({ error: 'missing_phone' })
-    // Upsert: se existir atualiza name (quando fornecido), senão cria
-    const user = await prisma.user.upsert({
-      where: { phone },
-      update: name ? { name } : {},
-      create: { phone, name }
-    })
-    res.status(201).json({ ok:true, user })
+    const password = req.body?.password ? String(req.body.password) : ''
+    if(!phone) return res.status(400).json({ error: 'bad_request', message: 'phone obrigatório' })
+    if(password){
+      // cria usuário com senha (usa createUser -> prisma via users.ts)
+      // createUser espera phone e password (adaptando assinatura conforme implementação atual)
+      // Se já existir, retornará erro user_exists; nesse caso fazemos fallback para login implícito.
+      try {
+        const created = await createUser({ phone, password, name })
+        return res.status(201).json({ ok:true, user: created })
+      } catch(err:any){
+        if(err?.code === 'user_exists'){
+          // tentar recuperar
+          const existing = await prisma.user.findUnique({ where: { phone } })
+          return res.json({ ok:true, user: existing })
+        }
+        return res.status(500).json({ error: 'internal_error', message: err?.message })
+      }
+    } else {
+      const user = await prisma.user.upsert({
+        where: { phone },
+        update: name ? { name } : {},
+        create: { phone, name }
+      })
+      return res.status(201).json({ ok:true, user })
+    }
   } catch(err:any){
     res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Vincula uma sessão existente (sessionId lógico) a um usuário
+r.post('/users/:id/bind-session', async (req: Request, res: Response) => {
+  try {
+    const userId = String(req.params.id)
+    const { session_id } = req.body || {}
+    if(!session_id) return res.status(400).json({ error: 'bad_request', message: 'session_id obrigatório' })
+    await setUserSession(userId, String(session_id))
+    return res.json({ ok:true })
+  } catch(err:any){
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
+  }
+})
+
+// Garante que a sessão (Baileys) do usuário exista e esteja inicializando em background
+r.post('/users/:id/ensure-session', async (req: Request, res: Response) => {
+  try {
+    const userId = String(req.params.id)
+    const { sessionId } = await ensureSessionStarted(userId)
+    return res.json({ ok:true, session_id: sessionId })
+  } catch(err:any){
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
@@ -398,26 +440,39 @@ r.get('/me', async (req: Request, res: Response) => {
 
 r.get('/me/profile', async (req: Request, res: Response) => {
   try {
+    const sessionQuery = String(req.query.session_id||'').trim()
+    if(sessionQuery){
+      // Perfil baseado em session_id direto
+      const session = await prisma.session.findUnique({
+        where: { sessionId: sessionQuery },
+        include: { user: true }
+      })
+      if(!session) return res.status(404).json({ error: 'not_found' })
+      return res.json({
+        sessionId: session.sessionId,
+        status: session.status,
+        user: session.user ? { id: session.user.id, phone: session.user.phone, name: session.user.name } : null
+      })
+    }
+    // Fluxo anterior (cookie uid)
     const uid = (req.cookies?.uid) || ''
     if(!uid) return res.status(401).json({ error: 'unauthenticated' })
-  const sessionId = await getOrCreateUserSession(uid)
+    const sessionId = await getOrCreateUserSession(uid)
     const usage = getUsage(sessionId)
     const status = getSessionStatus(sessionId)
-    // Tenta buscar perfil no Supabase (name, plan) se integração ativa
     let name: string | undefined
     let plan: string | undefined
     try {
       const prof = await fetchUserProfile(uid)
       if(prof){ name = prof.name; plan = (prof.plan as string) || undefined }
     } catch {}
-    // fallback de plano local se nada veio do Supabase
     if(!plan){
       const p = getPlan(uid)
       plan = p?.name || 'Free'
     }
-    res.json({ userId: uid, sessionId, name, plan, usage, session: status })
-  } catch (err:any){
-    res.status(500).json({ error: 'internal_error', message: err?.message })
+    return res.json({ userId: uid, sessionId, name, plan, usage, session: status })
+  } catch(err:any){
+    return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
 })
 
