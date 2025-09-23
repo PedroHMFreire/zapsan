@@ -177,16 +177,14 @@ async function createOrLoadSession(sessionId) {
         return;
     const baseDir = path_1.default.join(SESS_DIR, sessionId);
     ensureDir(baseDir);
-    // Upsert Session no banco (status connecting)
+    // Upsert sessão status connecting via Supabase
     try {
-        await db_1.prisma.session.upsert({
-            where: { sessionId },
-            update: { status: 'connecting' },
-            create: { sessionId, status: 'connecting' }
-        });
+        const { error } = await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'connecting' }, { onConflict: 'session_id' });
+        if (error)
+            console.warn('[wa][supa][session_upsert_connecting][warn]', sessionId, error.message);
     }
     catch (err) {
-        console.warn('[wa][prisma][session_upsert][warn]', sessionId, err?.message);
+        console.warn('[wa][supa][session_upsert_connecting][catch]', sessionId, err?.message);
     }
     // Hidratar histórico persistido (se ainda não carregado em sessionMsgs)
     try {
@@ -322,10 +320,12 @@ async function createOrLoadSession(sessionId) {
                 saveMeta(sess);
                 // atualizar status no banco
                 try {
-                    await db_1.prisma.session.update({ where: { sessionId }, data: { status: 'open' } });
+                    const { error } = await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'open' }, { onConflict: 'session_id' });
+                    if (error)
+                        console.warn('[wa][supa][session_status_open][warn]', sessionId, error.message);
                 }
                 catch (e) {
-                    console.warn('[wa][prisma][session_status_open][warn]', sessionId, e?.message);
+                    console.warn('[wa][supa][session_status_open][catch]', sessionId, e?.message);
                 }
             }
             if (u.connection === 'close') {
@@ -379,7 +379,9 @@ async function createOrLoadSession(sessionId) {
                 }
                 // persistir status closed
                 try {
-                    await db_1.prisma.session.update({ where: { sessionId }, data: { status: 'closed' } });
+                    const { error } = await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'closed' }, { onConflict: 'session_id' });
+                    if (error)
+                        console.warn('[wa][supa][session_status_closed][warn]', sessionId, error.message);
                 }
                 catch (e) { /* silencioso */ }
             }
@@ -423,17 +425,21 @@ async function createOrLoadSession(sessionId) {
                         const body = text || null;
                         // Converte timestamp ms para Date
                         const tsDate = new Date(ts);
-                        await db_1.prisma.message.create({
-                            data: {
-                                session: { connect: { sessionId } },
-                                jid,
-                                waMsgId,
-                                fromMe,
-                                body,
-                                timestamp: tsDate,
-                                raw: m
-                            }
+                        // Supabase insert de mensagem
+                        const { error: msgErr } = await db_1.supa.from('messages').insert({
+                            session_key: sessionId,
+                            jid,
+                            wa_msg_id: waMsgId,
+                            from_me: fromMe,
+                            body: body,
+                            timestamp: tsDate,
+                            raw: m
                         });
+                        if (msgErr) {
+                            if (!/duplicate|unique/i.test(msgErr.message)) {
+                                console.warn('[wa][supa][message_insert][warn]', sessionId, msgErr.message);
+                            }
+                        }
                     }
                     catch (e) {
                         // Evitar spam massivo: log só mensagem resumida
@@ -486,11 +492,8 @@ async function createOrLoadSession(sessionId) {
             try {
                 for (const c of cts) {
                     try {
-                        await db_1.prisma.contact.upsert({
-                            where: { sessionId_jid: { sessionId, jid: c.id } },
-                            update: { name: c.notify || c.name || null, isGroup: false },
-                            create: { session: { connect: { sessionId } }, jid: c.id, name: c.notify || c.name || null, isGroup: false }
-                        });
+                        const { error: cErr } = await db_1.supa.from('contacts').upsert({ session_key: sessionId, jid: c.id, name: c.notify || c.name || null, is_group: false }, { onConflict: 'session_key,jid' });
+                        if (cErr) { /* silencioso por item */ }
                     }
                     catch (e) { /* ignorar individuais */ }
                 }
@@ -509,11 +512,8 @@ async function createOrLoadSession(sessionId) {
                 for (const ch of chats) {
                     const isGroup = ch?.id?.endsWith?.('@g.us');
                     try {
-                        await db_1.prisma.contact.upsert({
-                            where: { sessionId_jid: { sessionId, jid: ch.id } },
-                            update: { name: ch.name || ch.id, isGroup },
-                            create: { session: { connect: { sessionId } }, jid: ch.id, name: ch.name || ch.id, isGroup }
-                        });
+                        const { error: cErr } = await db_1.supa.from('contacts').upsert({ session_key: sessionId, jid: ch.id, name: ch.name || ch.id, is_group: isGroup }, { onConflict: 'session_key,jid' });
+                        if (cErr) { /* ignorar individuais */ }
                     }
                     catch (e) { /* ignorar individuais */ }
                 }
@@ -588,7 +588,8 @@ function getStatus(sessionId) {
     // tenta global.sessoes se existir, depois fallback local
     const globalSessions = global.sessions;
     const s = globalSessions?.get?.(sessionId) ?? sessions.get(sessionId);
-    return { state: s?.lastState ?? 'unknown', hasQR: !!s?.qrDataUrl };
+    const jid = s?.sock?.user?.id || null;
+    return { state: s?.lastState ?? 'unknown', hasQR: !!s?.qrDataUrl, jid };
 }
 function getDebug(sessionId) {
     const s = sessions.get(sessionId);
@@ -701,7 +702,9 @@ function nukeAllSessions() {
 }
 // ==== Novos helpers públicos solicitados ====
 function getSessionStatus(sessionId) {
-    return { state: sessionState.get(sessionId) || 'closed' };
+    const s = sessions.get(sessionId);
+    const jid = s?.sock?.user?.id || null;
+    return { state: sessionState.get(sessionId) || 'closed', jid };
 }
 function getMessages(sessionId, limit = 500) {
     const all = sessionMsgs.get(sessionId) || [];

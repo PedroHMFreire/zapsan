@@ -54,18 +54,23 @@ function verify(password, stored) {
     }
 }
 // === Mapeadores ===
-function toPublic(u) { return { id: u.id, phone: u.phone, name: u.name, createdAt: u.createdAt }; }
-// === Funções exigidas pela nova API (phone baseado) ===
-async function createUser({ phone, name, password }) {
-    const exists = await db_1.prisma.user.findUnique({ where: { phone } });
-    if (exists)
-        throw new Error('user_exists');
+function toPublic(u) { return { id: u.id, email: u.email, name: u.name, createdAt: u.createdAt }; }
+// === Funções baseadas em email ===
+async function createUser({ email, name, password }) {
+    const emailLc = email.trim().toLowerCase();
     const passwordHash = await hash(password);
-    const u = await db_1.prisma.user.create({ data: { phone, name, passwordHash } });
-    return toPublic(u);
+    const { data, error } = await db_1.supa.from('users').insert({ email: emailLc, name: name || null, passwordHash }).select('*').single();
+    if (error) {
+        const msg = error.message || '';
+        if (/duplicate|unique|23505/i.test(msg))
+            throw new Error('user_exists');
+        throw new Error(msg || 'create_failed');
+    }
+    return toPublic(data);
 }
-async function verifyLogin({ phone, password }) {
-    const u = await db_1.prisma.user.findUnique({ where: { phone } });
+async function verifyLogin({ email, password }) {
+    const emailLc = email.trim().toLowerCase();
+    const { data: u } = await db_1.supa.from('users').select('id, email, name, passwordHash, createdAt').eq('email', emailLc).single();
     if (!u)
         return { ok: false };
     const ok = await verify(password, u.passwordHash);
@@ -73,63 +78,74 @@ async function verifyLogin({ phone, password }) {
         return { ok: false };
     return { ok: true, user: toPublic(u) };
 }
-async function getUser(idOrPhone) {
+async function getUser(idOrEmail) {
     let where;
-    if (/^[0-9a-fA-F-]{36}$/.test(idOrPhone) || idOrPhone.startsWith('u_')) { // uuid simples ou prefixado
-        where = { id: idOrPhone };
+    if (/^[0-9a-fA-F-]{36}$/.test(idOrEmail) || idOrEmail.startsWith('u_')) { // uuid
+        where = { id: idOrEmail };
     }
     else {
-        where = { phone: idOrPhone };
+        where = { email: idOrEmail.toLowerCase() };
     }
-    const u = await db_1.prisma.user.findUnique({ where });
+    let query = db_1.supa.from('users').select('id, email, name, createdAt');
+    if (where.id) {
+        query = query.eq('id', where.id);
+    }
+    if (where.email) {
+        query = query.eq('email', where.email);
+    }
+    const { data: u } = await query.single();
     if (!u)
         return null;
     return toPublic(u);
 }
 async function listUsers() {
-    const list = await db_1.prisma.user.findMany({ orderBy: { createdAt: 'desc' } });
-    return list.map(toPublic);
+    const { data, error } = await db_1.supa.from('users').select('id, email, name, createdAt').order('createdAt', { ascending: false });
+    if (error)
+        return [];
+    return (data || []).map(toPublic);
 }
 async function updateUser(id, patch) {
-    const existing = await db_1.prisma.user.findUnique({ where: { id } });
+    const { data: existing } = await db_1.supa.from('users').select('id').eq('id', id).single();
     if (!existing)
         throw new Error('user_not_found');
     const data = {};
     if (typeof patch.name === 'string')
         data.name = patch.name;
-    if (typeof patch.phone === 'string')
-        data.phone = patch.phone;
+    if (typeof patch.email === 'string')
+        data.email = patch.email.toLowerCase();
     if (typeof patch.password === 'string' && patch.password) {
         data.passwordHash = await hash(patch.password);
     }
-    const u = await db_1.prisma.user.update({ where: { id }, data });
-    return toPublic(u);
+    const { data: updated, error } = await db_1.supa.from('users').update(data).eq('id', id).select('id, email, name, createdAt').single();
+    if (error || !updated)
+        throw new Error('update_failed');
+    return toPublic(updated);
 }
 async function deleteUser(id) {
-    try {
-        await db_1.prisma.user.delete({ where: { id } });
-    }
-    catch (err) {
-        if (err.code === 'P2025')
+    const { error } = await db_1.supa.from('users').delete().eq('id', id);
+    if (error) {
+        if (/not.*found/i.test(error.message || ''))
             throw new Error('user_not_found');
-        throw err;
+        // Supabase delete silent se 0 rows; checar contagem seria outra query (omitimos para simplicidade)
     }
 }
-// Compatibilidade com rotas antigas que usam authenticate / upsertUserIfMissing / findUser
-// Mantemos assinaturas mas redirecionamos para novas funções (mapeando email->phone)
-async function findUser(phone) {
-    return db_1.prisma.user.findUnique({ where: { phone } });
+// Compatibilidade com rotas antigas (mantidas assinaturas auxiliares)
+async function findUser(email) {
+    const emailLc = email.toLowerCase();
+    const { data } = await db_1.supa.from('users').select('*').eq('email', emailLc).single();
+    return data || null;
 }
-async function upsertUserIfMissing(name, phone, password) {
-    const u = await db_1.prisma.user.findUnique({ where: { phone } });
+async function upsertUserIfMissing(name, email, password) {
+    const emailLc = email.toLowerCase();
+    const { data: u } = await db_1.supa.from('users').select('*').eq('email', emailLc).single();
     if (u)
         return u;
-    const created = await createUser({ phone, name, password });
-    return { id: created.id, phone: created.phone, name: created.name, createdAt: created.createdAt };
+    const created = await createUser({ email: emailLc, name, password });
+    return { id: created.id, email: created.email, name: created.name, createdAt: created.createdAt };
 }
-async function authenticate(phone, password) {
-    const { ok, user } = await verifyLogin({ phone, password });
+async function authenticate(email, password) {
+    const { ok, user } = await verifyLogin({ email, password });
     if (!ok || !user)
         return null;
-    return { id: user.id, phone: user.phone, name: user.name };
+    return { id: user.id, email: user.email, name: user.name };
 }

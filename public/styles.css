@@ -91,6 +91,12 @@ a{color:var(--wa-accent);text-decoration:none} a:hover{opacity:.9}
 .modal-h{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--wa-border)}
 .modal-b{padding:14px;overflow:auto}
 .modal-f{display:flex;gap:8px;justify-content:flex-end;padding:12px 14px;border-top:1px solid var(--wa-border);flex-wrap:wrap}
+.drawer{position:fixed;inset:0;display:none;background:rgba(0,0,0,.4);z-index:120}
+.drawer.show{display:block}
+.drawer-panel{position:absolute;right:0;top:0;bottom:0;width:min(420px,92vw);background:var(--wa-panel);border-left:1px solid var(--wa-border);box-shadow:var(--shadow);display:flex;flex-direction:column}
+.drawer-h{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--wa-border)}
+.drawer-b{padding:14px;overflow:auto}
+.drawer-f{display:flex;gap:8px;justify-content:flex-end;padding:12px 14px;border-top:1px solid var(--wa-border)}
 .row{display:flex;gap:10px;align-items:center;margin:8px 0}
 .label{width:140px;color:var(--muted);font-size:.92rem}
 .help{color:var(--muted);font-size:.85rem}

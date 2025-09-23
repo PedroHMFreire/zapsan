@@ -97,6 +97,7 @@
         </div>
         <div class="section">
           <strong>Sessão WhatsApp:</strong> <span id="pf-state">—</span>
+          <div class="help" id="pf-jid" style="margin-top:4px;">—</div>
           <div id="pf-qr-wrap" style="margin-top:6px;display:none"><img id="pf-qr" alt="QR" style="max-width:180px;border:1px solid #222;padding:4px;border-radius:4px"/></div>
           <div class="row" style="gap:6px;margin-top:8px">
             <button class="btn sm" id="btn-regen-qr" style="display:none">Regenerar QR</button>
@@ -241,7 +242,7 @@
       const r=await fetch(`/sessions/${encodeURIComponent(storedSession)}/status`);
       if(r.ok){
         const j=await r.json();
-        onlineBadge.textContent=j.state==='open'?'online':j.state;
+        onlineBadge.textContent=j.state==='open' ? (j.jid? `online · ${j.jid}`:'online') : j.state;
       }
     }catch{}
   }
@@ -344,6 +345,7 @@
   const pfQuota=document.getElementById('pf-quota');
   const pfUsageTotal=document.getElementById('pf-usage-total');
   const pfState=document.getElementById('pf-state');
+  const pfJid=document.getElementById('pf-jid');
   const pfQRWrap=document.getElementById('pf-qr-wrap');
   const pfQR=document.getElementById('pf-qr');
   const btnRegen=document.getElementById('btn-regen-qr');
@@ -379,6 +381,10 @@
       pfQuota.textContent=j.plan?.quotaDaily||0;
       pfUsageTotal.textContent=j.usage?.total||0;
       pfState.textContent=j.session?.state||'—';
+      if(pfJid){
+        if(j.session?.jid){ pfJid.textContent = 'Conectado: '+ j.session.jid; }
+        else { pfJid.textContent = 'Não conectado'; }
+      }
       // Persistir session_id para garantir que o restante da UI (SSE, envio) tenha a sessão correta
       try {
         if(j.sessionId){
@@ -548,7 +554,7 @@
 
   // Open modals
   $('#menu-flow')?.addEventListener('click', ()=>show('#mdl-flow'))
-  $('#menu-qr')?.addEventListener('click', ()=>{ openQRModal(); })
+  $('#menu-qr')?.addEventListener('click', ()=>{ showProfile(); })
   $('#menu-schedule')?.addEventListener('click', ()=>show('#mdl-schedule'))
   $('#menu-tags')?.addEventListener('click', ()=>show('#mdl-tags'))
 
@@ -836,7 +842,7 @@
 
     // Menu open bindings safeguard (in case earlier script ran too early somehow)
     $('#menu-flow')?.addEventListener('click', ()=>$('#mdl-flow')?.classList.add('show'))
-    $('#menu-qr')?.addEventListener('click', ()=>$('#mdl-qr')?.classList.add('show'))
+  $('#menu-qr')?.addEventListener('click', showProfile)
     $('#menu-schedule')?.addEventListener('click', ()=>$('#mdl-schedule')?.classList.add('show'))
     $('#menu-tags')?.addEventListener('click', ()=>$('#mdl-tags')?.classList.add('show'))
 

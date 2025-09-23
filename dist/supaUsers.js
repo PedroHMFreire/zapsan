@@ -4,6 +4,7 @@ exports.registerUser = registerUser;
 exports.loginUser = loginUser;
 exports.fetchUserProfile = fetchUserProfile;
 const supabase_1 = require("./supabase");
+const logger_1 = require("./logger");
 const users_1 = require("./users");
 // Tabela esperada no Supabase: profiles (ou users) com colunas: id (uuid ou text), email, name, plan
 // Se o projeto já tem uma tabela específica (ex: users), ajuste TABLE_NAME abaixo.
@@ -12,9 +13,9 @@ const TABLE_NAME = process.env.SUPABASE_USERS_TABLE || 'users';
 async function registerUser(name, email, password) {
     const emailLc = email.toLowerCase().trim();
     if (!(0, supabase_1.hasSupabaseEnv)()) {
-        // fallback local agora usa phone (reutilizando email como phone para compat temporal)
+        // fallback local agora usa email diretamente
         try {
-            const user = await (0, users_1.createUser)({ phone: emailLc, name, password });
+            const user = await (0, users_1.createUser)({ email: emailLc, name, password });
             return { ok: true, userId: user.id, created: true };
         }
         catch (err) {
@@ -42,27 +43,54 @@ async function registerUser(name, email, password) {
 async function loginUser(email, password) {
     const emailLc = email.toLowerCase().trim();
     if (!(0, supabase_1.hasSupabaseEnv)()) {
-        const u = await (0, users_1.authenticate)(emailLc, password);
-        if (!u)
-            return { ok: false, error: 'invalid_credentials' };
-        return { ok: true, userId: u.id };
+        try {
+            const u = await (0, users_1.authenticate)(emailLc, password);
+            if (!u)
+                return { ok: false, error: 'invalid_credentials' };
+            return { ok: true, userId: u.id };
+        }
+        catch (err) {
+            logger_1.logger.error({ msg: 'local_auth_error', email: emailLc, err: err?.message });
+            return { ok: false, error: 'internal_error' };
+        }
     }
-    const supabase = (0, supabase_1.getSupabase)();
-    const { data, error } = await supabase.auth.signInWithPassword({ email: emailLc, password });
-    if (error) {
-        if (error.message.toLowerCase().includes('invalid'))
-            return { ok: false, error: 'invalid_credentials' };
-        return { ok: false, error: 'supabase_login_failed' };
+    let supabase;
+    try {
+        supabase = (0, supabase_1.getSupabase)();
     }
-    const uid = data.user?.id || emailLc;
-    return { ok: true, userId: uid };
+    catch (err) {
+        logger_1.logger.error({ msg: 'supabase_config_error', err: err?.message });
+        return { ok: false, error: 'supabase_config_error' };
+    }
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email: emailLc, password });
+        if (error) {
+            const msg = (error.message || '').toLowerCase();
+            if (msg.includes('invalid') || msg.includes('invalid login credentials')) {
+                return { ok: false, error: 'invalid_credentials' };
+            }
+            logger_1.logger.warn({ msg: 'supabase_login_failed', email: emailLc, supabaseError: error.message });
+            return { ok: false, error: 'supabase_login_failed' };
+        }
+        const uid = data.user?.id || emailLc;
+        return { ok: true, userId: uid };
+    }
+    catch (err) {
+        const emsg = String(err?.message || '');
+        if (/fetch failed|network|timeout/i.test(emsg)) {
+            logger_1.logger.error({ msg: 'supabase_network_error', email: emailLc, err: emsg });
+            return { ok: false, error: 'supabase_network_error' };
+        }
+        logger_1.logger.error({ msg: 'supabase_unexpected_error', email: emailLc, err: emsg });
+        return { ok: false, error: 'supabase_unavailable' };
+    }
 }
 async function fetchUserProfile(userIdOrEmail) {
     if (!(0, supabase_1.hasSupabaseEnv)()) {
         const u = await (0, users_1.findUser)(userIdOrEmail.toLowerCase());
         if (!u)
             return null;
-        return { id: u.id, email: u.phone, name: u.name || undefined, plan: 'local' };
+        return { id: u.id, email: u.email, name: u.name || undefined, plan: 'local' };
     }
     const supabase = (0, supabase_1.getSupabase)();
     // Procurar por id OU email

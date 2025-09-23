@@ -18,6 +18,9 @@ const knowledge_1 = require("./knowledge");
 const userSessions_1 = require("./userSessions");
 const usage_1 = require("./usage");
 const db_1 = require("./db");
+const bcrypt_1 = __importDefault(require("bcrypt"));
+const userSessions_2 = require("./userSessions");
+const supabase_1 = require("./supabase");
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path_1.default.join(process.cwd(), 'data');
 try {
@@ -79,65 +82,71 @@ schedules.filter(s => s.status === 'pending').forEach(scheduleDispatch);
 // If 'createOrLoadSession' exists but is exported with a different name, import it accordingly:
 // import { actualExportedName as createOrLoadSession, getQR, sendText } from './wa'
 const r = (0, express_1.Router)();
+// Diagnóstico de ambiente de autenticação (não expõe chaves reais)
+r.get('/debug/auth-env', (_req, res) => {
+    const flags = {
+        hasSupabaseEnv: (0, supabase_1.hasSupabaseEnv)(),
+        SUPABASE_URL_SET: !!process.env.SUPABASE_URL,
+        SUPABASE_ANON_KEY_SET: !!process.env.SUPABASE_ANON_KEY,
+        SUPABASE_SERVICE_ROLE_KEY_SET: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+    };
+    res.json(flags);
+});
 // === Auth & sessão por usuário ===
 // /auth/register: cria novo usuário; /auth/login: apenas autentica (sem auto-criação) ou aceita legacy { user }
+// Novo registro baseado em email + password
 r.post('/auth/register', async (req, res) => {
     try {
-        const name = String(req.body?.name || '').trim();
-        const emailRaw = String(req.body?.email || '').trim().toLowerCase();
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const name = req.body?.name ? String(req.body.name).trim() : '';
         const password = String(req.body?.password || '');
-        const confirm = String(req.body?.confirm || '');
-        if (!emailRaw || !password)
+        if (!email || !password)
             return res.status(400).json({ error: 'missing_fields' });
         if (password.length < 6)
             return res.status(400).json({ error: 'weak_password' });
-        if (password !== confirm)
-            return res.status(400).json({ error: 'password_mismatch' });
-        const out = await (0, supaUsers_1.registerUser)(name, emailRaw, password);
-        if (!out.ok) {
-            const map = { user_exists: 409, supabase_signup_failed: 502 };
-            const code = out.error ? (map[out.error] || 400) : 400;
-            return res.status(code).json({ error: out.error || 'registration_failed' });
+        const hash = await bcrypt_1.default.hash(password, 10);
+        const { data, error } = await db_1.supa.from('users').upsert({ email, name: name || null, passwordHash: hash }, { onConflict: 'email' }).select('id, email, name').single();
+        if (error) {
+            const msg = error.message || '';
+            if (/duplicate|unique|23505/i.test(msg))
+                return res.status(409).json({ error: 'user_exists' });
+            return res.status(500).json({ error: 'registration_failed', detail: msg });
         }
-        const sessionId = await (0, userSessions_1.getOrCreateUserSession)(out.userId);
-        // dispara inicialização (não aguarda) para já preparar QR se necessário
-        (0, wa_1.createOrLoadSession)(sessionId).catch(() => { });
-        res.cookie('uid', out.userId, { httpOnly: true, sameSite: 'lax', secure: false });
-        res.status(201).json({ ok: true, userId: out.userId, sessionId, created: out.created, sessionBoot: true });
-    }
-    catch (err) {
-        res.status(500).json({ error: 'internal_error', message: err?.message });
-    }
-});
-r.post('/auth/login', async (req, res) => {
-    try {
-        const legacyUser = String(req.body?.user || '').trim();
-        const emailRaw = String(req.body?.email || '').trim().toLowerCase();
-        const password = String(req.body?.password || '');
-        if (!emailRaw && !legacyUser)
-            return res.status(400).json({ error: 'missing_credentials' });
-        let userId = '';
-        if (emailRaw) {
-            const out = await (0, supaUsers_1.loginUser)(emailRaw, password);
-            if (!out.ok) {
-                const map = { invalid_credentials: 401, supabase_login_failed: 502 };
-                const code = out.error ? (map[out.error] || 400) : 400;
-                return res.status(code).json({ error: out.error || 'login_failed' });
-            }
-            userId = out.userId;
-        }
-        else {
-            // legacy fallback
-            userId = legacyUser;
-        }
+        if (!data)
+            return res.status(500).json({ error: 'registration_failed' });
+        const userId = data.id;
         const sessionId = await (0, userSessions_1.getOrCreateUserSession)(userId);
-        // garante que a sessão será criada/carregada no primeiro login (lazy fire & forget)
         (0, wa_1.createOrLoadSession)(sessionId).catch(() => { });
         res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false });
-        res.json({ ok: true, userId, sessionId, sessionBoot: true });
+        return res.status(201).json({ ok: true, user: data, sessionId });
     }
     catch (err) {
-        res.status(500).json({ error: 'internal_error', message: err?.message });
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
+    }
+});
+// Login baseado em email + password
+r.post('/auth/login', async (req, res) => {
+    try {
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const password = String(req.body?.password || '');
+        if (!email || !password)
+            return res.status(400).json({ error: 'missing_credentials' });
+        const { data: u, error } = await db_1.supa.from('users')
+            .select('id, email, name, passwordHash')
+            .eq('email', email)
+            .single();
+        if (error || !u || !u.passwordHash)
+            return res.status(401).json({ error: 'invalid_credentials' });
+        const ok = await bcrypt_1.default.compare(password, u.passwordHash);
+        if (!ok)
+            return res.status(401).json({ error: 'invalid_credentials' });
+        const sessionId = await (0, userSessions_1.getOrCreateUserSession)(u.id);
+        (0, wa_1.createOrLoadSession)(sessionId).catch(() => { });
+        res.cookie('uid', u.id, { httpOnly: true, sameSite: 'lax', secure: false });
+        return res.json({ ok: true, user: { id: u.id, email: u.email, name: u.name }, sessionId, sessionBoot: true });
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
 // Retorna a sessão do usuário logado (por cookie ou query user)
@@ -280,24 +289,51 @@ r.get('/sessions/:id/qr', async (req, res) => {
         return res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
-// === DB-backed endpoints (Prisma) ===
-// Upsert básico de usuário por phone (unique). Body: { phone, name? }
+// Upsert básico de usuário por email (unique). Body: { email, name? }
 r.post('/users', async (req, res) => {
     try {
-        const phone = String(req.body?.phone || '').trim();
-        const name = req.body?.name ? String(req.body.name).trim() : undefined;
-        if (!phone)
-            return res.status(400).json({ error: 'missing_phone' });
-        // Upsert: se existir atualiza name (quando fornecido), senão cria
-        const user = await db_1.prisma.user.upsert({
-            where: { phone },
-            update: name ? { name } : {},
-            create: { phone, name }
-        });
-        res.status(201).json({ ok: true, user });
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const name = req.body?.name ? String(req.body.name).trim() : null;
+        if (!email)
+            return res.status(400).json({ error: 'bad_request', message: 'email obrigatório' });
+        const { data, error } = await db_1.supa.from('users').upsert({ email, name }, { onConflict: 'email' }).select('id, email, name').single();
+        if (error) {
+            const msg = error.message || '';
+            if (/duplicate|unique|23505/i.test(msg)) {
+                const { data: existing } = await db_1.supa.from('users').select('id, email, name').eq('email', email).single();
+                return res.json({ ok: true, user: existing });
+            }
+            return res.status(500).json({ error: 'internal_error', detail: msg });
+        }
+        return res.status(201).json({ ok: true, user: data });
     }
     catch (err) {
-        res.status(500).json({ error: 'internal_error', message: err?.message });
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
+    }
+});
+// Vincula uma sessão existente (sessionId lógico) a um usuário
+r.post('/users/:id/bind-session', async (req, res) => {
+    try {
+        const userId = String(req.params.id);
+        const { session_id } = req.body || {};
+        if (!session_id)
+            return res.status(400).json({ error: 'bad_request', message: 'session_id obrigatório' });
+        await (0, userSessions_2.setUserSession)(userId, String(session_id));
+        return res.json({ ok: true });
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
+    }
+});
+// Garante que a sessão (Baileys) do usuário exista e esteja inicializando em background
+r.post('/users/:id/ensure-session', async (req, res) => {
+    try {
+        const userId = String(req.params.id);
+        const { sessionId } = await (0, userSessions_2.ensureSessionStarted)(userId);
+        return res.json({ ok: true, session_id: sessionId });
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
 // Lista sessões associadas a um usuário (id do model User, não sessionId lógico)
@@ -306,8 +342,13 @@ r.get('/users/:id/sessions', async (req, res) => {
         const { id } = req.params;
         if (!id)
             return res.status(400).json({ error: 'missing_id' });
-        const sessions = await db_1.prisma.session.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' } });
-        res.json({ sessions });
+        const { data, error } = await db_1.supa.from('sessions')
+            .select('*')
+            .eq('user_id', id)
+            .order('created_at', { ascending: false });
+        if (error)
+            return res.status(500).json({ error: 'internal_error', detail: error.message });
+        res.json({ sessions: data || [] });
     }
     catch (err) {
         res.status(500).json({ error: 'internal_error', message: err?.message });
@@ -317,13 +358,12 @@ r.get('/users/:id/sessions', async (req, res) => {
 // Query params: limit (default 50, max 200), before (timestamp ISO ou epoch ms) para paginação
 r.get('/sessions/:id/messages/db', async (req, res) => {
     try {
-        const { id } = req.params; // id aqui é session.sessionId lógico
+        const { id } = req.params;
         const limitRaw = Number(req.query.limit || 50);
         const limit = isNaN(limitRaw) ? 50 : Math.min(Math.max(limitRaw, 1), 200);
         const beforeRaw = String(req.query.before || '').trim();
         let beforeDate;
         if (beforeRaw) {
-            // tenta parse epoch
             const asNum = Number(beforeRaw);
             if (!isNaN(asNum) && asNum > 0) {
                 beforeDate = new Date(asNum);
@@ -334,43 +374,42 @@ r.get('/sessions/:id/messages/db', async (req, res) => {
                     beforeDate = d;
             }
         }
-        // Recupera Session.id interno a partir de sessionId lógico
-        const session = await db_1.prisma.session.findUnique({ where: { sessionId: id }, select: { id: true } });
-        if (!session)
-            return res.status(404).json({ error: 'session_not_found' });
-        const where = { sessionId: session.id };
+        // Busca mensagens direto por session_key
+        let query = db_1.supa.from('messages')
+            .select('*')
+            .eq('session_key', id)
+            .order('timestamp', { ascending: false })
+            .limit(limit);
         if (beforeDate) {
-            where.timestamp = { lt: beforeDate };
+            query = query.lt('timestamp', beforeDate.toISOString());
         }
-        const messages = await db_1.prisma.message.findMany({
-            where,
-            orderBy: { timestamp: 'desc' },
-            take: limit,
-        });
-        // Próximo cursor é o menor timestamp retornado (para continuar paginação)
+        const { data, error } = await query;
+        if (error)
+            return res.status(500).json({ error: 'internal_error', detail: error.message });
         let nextCursor = null;
-        if (messages.length === limit) {
-            const last = messages[messages.length - 1];
-            nextCursor = last.timestamp.toISOString();
+        if (data && data.length === limit) {
+            const last = data[data.length - 1];
+            if (last?.timestamp)
+                nextCursor = last.timestamp;
         }
-        res.json({ messages, nextCursor, pageSize: messages.length });
+        res.json({ messages: data || [], nextCursor, pageSize: data?.length || 0 });
     }
     catch (err) {
-        res.status(500).json({ error: 'internal_error', message: err?.message });
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
 // Lista contatos de uma sessão persistidos
 r.get('/sessions/:id/contacts', async (req, res) => {
     try {
-        const { id } = req.params; // sessionId lógico
-        const session = await db_1.prisma.session.findUnique({ where: { sessionId: id }, select: { id: true } });
-        if (!session)
-            return res.status(404).json({ error: 'session_not_found' });
-        const contacts = await db_1.prisma.contact.findMany({
-            where: { sessionId: session.id },
-            orderBy: [{ name: 'asc' }, { jid: 'asc' }]
-        });
-        res.json({ contacts });
+        const { id } = req.params;
+        const { data, error } = await db_1.supa.from('contacts')
+            .select('*')
+            .eq('session_key', id)
+            .order('name', { ascending: true })
+            .order('jid', { ascending: true });
+        if (error)
+            return res.status(500).json({ error: 'internal_error', detail: error.message });
+        res.json({ contacts: data || [] });
     }
     catch (err) {
         res.status(500).json({ error: 'internal_error', message: err?.message });
@@ -424,13 +463,30 @@ r.get('/me', async (req, res) => {
 });
 r.get('/me/profile', async (req, res) => {
     try {
+        const sessionQuery = String(req.query.session_id || '').trim();
+        if (sessionQuery) {
+            // Perfil baseado em session_id direto
+            const { data: s, error: sErr } = await db_1.supa.from('sessions')
+                .select('*')
+                .eq('session_id', sessionQuery)
+                .single();
+            if (sErr || !s)
+                return res.status(404).json({ error: 'not_found' });
+            let userData = null;
+            if (s.user_id) {
+                const { data: usr } = await db_1.supa.from('users').select('id, email, name').eq('id', s.user_id).single();
+                if (usr)
+                    userData = usr;
+            }
+            return res.json({ sessionId: s.session_id, status: s.status, user: userData });
+        }
+        // Fluxo anterior (cookie uid)
         const uid = (req.cookies?.uid) || '';
         if (!uid)
             return res.status(401).json({ error: 'unauthenticated' });
         const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
         const usage = (0, usage_1.getUsage)(sessionId);
         const status = (0, wa_1.getSessionStatus)(sessionId);
-        // Tenta buscar perfil no Supabase (name, plan) se integração ativa
         let name;
         let plan;
         try {
@@ -441,15 +497,14 @@ r.get('/me/profile', async (req, res) => {
             }
         }
         catch { }
-        // fallback de plano local se nada veio do Supabase
         if (!plan) {
             const p = (0, usage_1.getPlan)(uid);
             plan = p?.name || 'Free';
         }
-        res.json({ userId: uid, sessionId, name, plan, usage, session: status });
+        return res.json({ userId: uid, sessionId, name, plan, usage, session: status });
     }
     catch (err) {
-        res.status(500).json({ error: 'internal_error', message: err?.message });
+        return res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
 r.post('/me/logout', (req, res) => {

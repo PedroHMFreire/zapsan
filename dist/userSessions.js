@@ -15,27 +15,39 @@ const wa_1 = require("./wa");
 async function getOrCreateUserSession(userId) {
     if (!userId)
         throw new Error('missing_user');
-    const existing = await db_1.prisma.session.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } });
-    if (existing)
-        return existing.sessionId;
+    const { data: existingList } = await db_1.supa.from('sessions')
+        .select('session_id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+    if (existingList && existingList.length) {
+        return existingList[0].session_id;
+    }
     const sessionId = 'u_' + crypto_1.default.randomUUID();
-    await db_1.prisma.session.create({ data: { sessionId, status: 'connecting', userId } });
+    await db_1.supa.from('sessions').insert({ session_id: sessionId, status: 'connecting', user_id: userId });
     return sessionId;
 }
 async function getUserSession(userId) {
     if (!userId)
         return null;
-    const existing = await db_1.prisma.session.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } });
-    return existing?.sessionId || null;
+    const { data } = await db_1.supa.from('sessions')
+        .select('session_id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+    if (data && data.length) {
+        return data[0].session_id;
+    }
+    return null;
 }
 async function setUserSession(userId, sessionId) {
     if (!userId || !sessionId)
         throw new Error('missing_params');
-    await db_1.prisma.session.upsert({
-        where: { sessionId },
-        update: { userId },
-        create: { sessionId, status: 'connecting', userId }
-    });
+    // Upsert manual: tenta atualizar, se não existir insere
+    const { error: updErr } = await db_1.supa.from('sessions').update({ user_id: userId }).eq('session_id', sessionId);
+    if (updErr) { /* continua tentativa de insert */ }
+    // Checar se atualizou alguma (Supabase não retorna contagem sem retornar=representation) -> simplificamos com insert ignorando conflito
+    await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'connecting', user_id: userId }, { onConflict: 'session_id' });
 }
 async function ensureSessionStarted(userId) {
     const sessionId = await getOrCreateUserSession(userId);
@@ -44,9 +56,9 @@ async function ensureSessionStarted(userId) {
 }
 // (Opcional) manter função de listagem antiga para debug, agora vinda do banco
 async function listUserSessions() {
-    const sessions = await db_1.prisma.session.findMany({ select: { sessionId: true, userId: true, createdAt: true }, orderBy: { createdAt: 'desc' } });
+    const { data } = await db_1.supa.from('sessions').select('session_id, user_id, created_at').order('created_at', { ascending: false });
     const map = {};
-    sessions.forEach((s) => { if (s.userId && !(s.userId in map))
-        map[s.userId] = s.sessionId; });
+    (data || []).forEach((s) => { if (s.user_id && !(s.user_id in map))
+        map[s.user_id] = s.session_id; });
     return map;
 }

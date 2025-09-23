@@ -534,7 +534,8 @@ export function getStatus(sessionId: string) {
   // tenta global.sessoes se existir, depois fallback local
   const globalSessions: any = (global as any).sessions
   const s: Sess | undefined = globalSessions?.get?.(sessionId) ?? sessions.get(sessionId)
-  return { state: s?.lastState ?? 'unknown', hasQR: !!s?.qrDataUrl }
+  const jid = (s as any)?.sock?.user?.id || null
+  return { state: s?.lastState ?? 'unknown', hasQR: !!s?.qrDataUrl, jid }
 }
 
 export function getDebug(sessionId: string) {
@@ -630,8 +631,10 @@ export function nukeAllSessions(){
 }
 
 // ==== Novos helpers públicos solicitados ====
-export function getSessionStatus(sessionId: string): { state: SessState } {
-  return { state: sessionState.get(sessionId) || 'closed' }
+export function getSessionStatus(sessionId: string): { state: SessState; jid?: string | null } {
+  const s = sessions.get(sessionId)
+  const jid = (s as any)?.sock?.user?.id || null
+  return { state: sessionState.get(sessionId) || 'closed', jid }
 }
 export function getMessages(sessionId: string, limit = 500): Msg[] {
   const all = sessionMsgs.get(sessionId) || []
