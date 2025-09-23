@@ -9,6 +9,15 @@
     try {
       const onLogin = location.pathname.endsWith('/login.html');
       const hasFlag = localStorage.getItem('auth')==='ok';
+      // Hidratar session_id a partir da URL, se presente (deep-link/share)
+      try {
+        const u = new URL(window.location.href);
+        const sidQ = u.searchParams.get('session_id');
+        if(sidQ){
+          localStorage.setItem('session_id', sidQ);
+          if(!localStorage.getItem('sessionId')) localStorage.setItem('sessionId', sidQ);
+        }
+      } catch {}
       // Shim: garantir chave legacy session_id usando sessionId se existir
       try { const sid = localStorage.getItem('sessionId'); if(sid && !localStorage.getItem('session_id')) localStorage.setItem('session_id', sid); } catch {}
       if(onLogin && hasFlag){ location.replace('/'); return; }
@@ -243,6 +252,14 @@
       if(r.ok){
         const j=await r.json();
         onlineBadge.textContent=j.state==='open' ? (j.jid? `online · ${j.jid}`:'online') : j.state;
+        // Quando conectar, refletir session_id na URL sem recarregar
+        if(j.state==='open'){
+          const url = new URL(window.location.href);
+          if(url.searchParams.get('session_id') !== storedSession){
+            url.searchParams.set('session_id', storedSession);
+            history.replaceState(null, '', url.toString());
+          }
+        }
       }
     }catch{}
   }
@@ -391,6 +408,14 @@
           localStorage.setItem('session_id', j.sessionId);
           // manter chave alternativa (legacy) se algum código usa
           if(!localStorage.getItem('sessionId')) localStorage.setItem('sessionId', j.sessionId);
+          // Se já estiver conectado, refletir session_id na URL
+          if((j.session?.state||'')==='open'){
+            const url = new URL(window.location.href);
+            if(url.searchParams.get('session_id') !== j.sessionId){
+              url.searchParams.set('session_id', j.sessionId);
+              history.replaceState(null, '', url.toString());
+            }
+          }
         }
       } catch {}
       const st=j.session?.state;

@@ -84,8 +84,10 @@
           toast('Conectado!');
           setTimeout(() => {
             // Redireciona para o console principal já logado
-            try { localStorage.setItem('sessionId', id) } catch {}
-            location.href = `/`;
+            try { localStorage.setItem('sessionId', id); localStorage.setItem('session_id', id); } catch {}
+            const u = new URL('/', window.location.origin);
+            u.searchParams.set('session_id', id);
+            location.href = u.toString();
           }, 1200);
         } else if(s.state === 'restarting' || s.state === 'reconnecting') {
           statusEl.textContent = 'Reconectando...';
