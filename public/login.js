@@ -166,8 +166,15 @@
     } finally { setLoading(false) }
   })
 
-  // Redirect se já logado
-  try { if(localStorage.getItem('auth')==='ok'){ location.replace('/') } } catch {}
+  // Redirect se já logado: valida cookie no backend para evitar falso positivo
+  try {
+    if(localStorage.getItem('auth')==='ok'){
+      fetch('/me/profile').then(r=>{
+        if(r.ok){ location.replace('/') }
+        else { localStorage.removeItem('auth') }
+      }).catch(()=>{})
+    }
+  } catch {}
 
   // Estado inicial
   setMode('login')

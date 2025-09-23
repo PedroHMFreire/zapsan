@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import path from 'path'
 import { setDefaultResultOrder } from 'dns'
@@ -25,9 +26,34 @@ process.on('uncaughtException', (err) => {
 app.use(cors())
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser())
 
-// Frontend estático (sem bundler)
+// Frontend estático (sem bundler) - servimos depois dos redirects básicos
 const pub = path.join(process.cwd(), 'public')
+
+// Redireciona sempre para /login.html se não autenticado (cookie uid ausente) quando acessa raiz ou páginas principais
+app.get(['/', '/index.html'], (req, res, next) => {
+  try {
+    const uid = req.cookies?.uid
+    if(!uid){
+      return res.redirect(302, '/login.html')
+    }
+    // autenticado: segue fluxo normal (servir index via estático)
+    return res.sendFile(path.join(pub, 'index.html'))
+  } catch {
+    return res.redirect(302, '/login.html')
+  }
+})
+
+// Se já autenticado e abrir /login.html manualmente, redireciona para /
+app.get('/login.html', (req, res, next) => {
+  const uid = req.cookies?.uid
+  if(uid){
+    return res.redirect(302, '/')
+  }
+  return res.sendFile(path.join(pub, 'login.html'))
+})
+
 app.use(express.static(pub))
 
 // Rotas da API
