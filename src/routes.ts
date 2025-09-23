@@ -90,30 +90,25 @@ r.get('/debug/auth-env', (_req: Request, res: Response) => {
 // === Auth & sessão por usuário ===
 // /auth/register: cria novo usuário; /auth/login: apenas autentica (sem auto-criação) ou aceita legacy { user }
 
-// Novo registro baseado em phone + password (substitui fluxo anterior)
+// Novo registro baseado em email + password
 r.post('/auth/register', async (req: Request, res: Response) => {
   try {
-    const phone = String(req.body?.phone||'').trim()
+    const email = String(req.body?.email||'').trim().toLowerCase()
     const name = req.body?.name ? String(req.body.name).trim() : ''
     const password = String(req.body?.password||'')
-    if(!phone || !password) return res.status(400).json({ error: 'missing_fields' })
+    if(!email || !password) return res.status(400).json({ error: 'missing_fields' })
     if(password.length < 6) return res.status(400).json({ error: 'weak_password' })
-    const hash = await bcrypt.hash(String(password), 10)
+    const hash = await bcrypt.hash(password, 10)
     const { data, error } = await supa.from('users').upsert(
-      { phone: phone, name: name || null, passwordHash: hash },
-      { onConflict: 'phone' }
-    ).select('id, phone, name').single()
+      { email, name: name || null, passwordHash: hash },
+      { onConflict: 'email' }
+    ).select('id, email, name').single()
     if(error){
-      // tentativa de detectar conflito - Supabase retorna 23505 (unique violation) no Postgres
       const msg = error.message || ''
-      if(/duplicate|unique|23505/i.test(msg)){
-        return res.status(409).json({ error: 'user_exists' })
-      }
+      if(/duplicate|unique|23505/i.test(msg)) return res.status(409).json({ error: 'user_exists' })
       return res.status(500).json({ error: 'registration_failed', detail: msg })
     }
-    if(!data){
-      return res.status(500).json({ error: 'registration_failed' })
-    }
+    if(!data) return res.status(500).json({ error: 'registration_failed' })
     const userId = data.id
     const sessionId = await getOrCreateUserSession(userId)
     createOrLoadSession(sessionId).catch(()=>{})
@@ -124,25 +119,23 @@ r.post('/auth/register', async (req: Request, res: Response) => {
   }
 })
 
-// Login baseado em phone + password
+// Login baseado em email + password
 r.post('/auth/login', async (req: Request, res: Response) => {
   try {
-    const phone = String(req.body?.phone||'').trim()
+    const email = String(req.body?.email||'').trim().toLowerCase()
     const password = String(req.body?.password||'')
-    if(!phone || !password) return res.status(400).json({ error: 'missing_credentials' })
+    if(!email || !password) return res.status(400).json({ error: 'missing_credentials' })
     const { data: u, error } = await supa.from('users')
-      .select('id, phone, name, passwordHash')
-      .eq('phone', phone)
+      .select('id, email, name, passwordHash')
+      .eq('email', email)
       .single()
-    if(error || !u || !u.passwordHash){
-      return res.status(401).json({ error: 'invalid_credentials' })
-    }
-    const ok = await bcrypt.compare(String(password), u.passwordHash)
+    if(error || !u || !u.passwordHash) return res.status(401).json({ error: 'invalid_credentials' })
+    const ok = await bcrypt.compare(password, u.passwordHash)
     if(!ok) return res.status(401).json({ error: 'invalid_credentials' })
     const sessionId = await getOrCreateUserSession(u.id)
     createOrLoadSession(sessionId).catch(()=>{})
     res.cookie('uid', u.id, { httpOnly: true, sameSite: 'lax', secure: false })
-    return res.json({ ok:true, user: { id: u.id, phone: u.phone, name: u.name }, sessionId, sessionBoot: true })
+    return res.json({ ok:true, user: { id: u.id, email: u.email, name: u.name }, sessionId, sessionBoot: true })
   } catch(err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -282,23 +275,20 @@ r.get('/sessions/:id/qr', async (req: Request, res: Response) => {
   }
 })
 
-// === DB-backed endpoints (Prisma) ===
-// Upsert básico de usuário por phone (unique). Body: { phone, name? }
-// Upsert básico de usuário (sem senha) via Supabase
+// Upsert básico de usuário por email (unique). Body: { email, name? }
 r.post('/users', async (req: Request, res: Response) => {
   try {
-    const phone = String(req.body?.phone||'').trim()
+    const email = String(req.body?.email||'').trim().toLowerCase()
     const name = req.body?.name ? String(req.body.name).trim() : null
-    if(!phone) return res.status(400).json({ error: 'bad_request', message: 'phone obrigatório' })
+    if(!email) return res.status(400).json({ error: 'bad_request', message: 'email obrigatório' })
     const { data, error } = await supa.from('users').upsert(
-      { phone, name },
-      { onConflict: 'phone' }
-    ).select('id, phone, name').single()
+      { email, name },
+      { onConflict: 'email' }
+    ).select('id, email, name').single()
     if(error){
       const msg = error.message || ''
       if(/duplicate|unique|23505/i.test(msg)){
-        // Buscar existente
-        const { data: existing } = await supa.from('users').select('id, phone, name').eq('phone', phone).single()
+        const { data: existing } = await supa.from('users').select('id, email, name').eq('email', email).single()
         return res.json({ ok:true, user: existing })
       }
       return res.status(500).json({ error: 'internal_error', detail: msg })
@@ -459,7 +449,7 @@ r.get('/me/profile', async (req: Request, res: Response) => {
       if(sErr || !s) return res.status(404).json({ error: 'not_found' })
       let userData: any = null
       if(s.user_id){
-        const { data: usr } = await supa.from('users').select('id, phone, name').eq('id', s.user_id).single()
+        const { data: usr } = await supa.from('users').select('id, email, name').eq('id', s.user_id).single()
         if(usr) userData = usr
       }
       return res.json({ sessionId: s.session_id, status: s.status, user: userData })

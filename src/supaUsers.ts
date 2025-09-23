@@ -25,9 +25,9 @@ export interface AuthResult {
 export async function registerUser(name: string, email: string, password: string): Promise<AuthResult> {
   const emailLc = email.toLowerCase().trim()
   if(!hasSupabaseEnv()){
-    // fallback local agora usa phone (reutilizando email como phone para compat temporal)
+    // fallback local agora usa email diretamente
     try {
-      const user = await createLocalUser({ phone: emailLc, name, password })
+      const user = await createLocalUser({ email: emailLc, name, password })
       return { ok:true, userId: user.id, created:true }
     } catch (err:any){
       if(err?.message === 'user_exists') return { ok:false, error:'user_exists' }
@@ -53,7 +53,7 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
   const emailLc = email.toLowerCase().trim()
   if(!hasSupabaseEnv()){
     try {
-      const u = await authLocal(emailLc, password)
+    const u = await authLocal(emailLc, password)
       if(!u) return { ok:false, error:'invalid_credentials' }
       return { ok:true, userId: u.id }
     } catch(err:any){
@@ -91,9 +91,9 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
 
 export async function fetchUserProfile(userIdOrEmail: string): Promise<SupaUserData | null> {
   if(!hasSupabaseEnv()){
-    const u = await findLocalUser(userIdOrEmail.toLowerCase())
-    if(!u) return null
-    return { id: u.id, email: u.phone, name: u.name || undefined, plan: 'local' }
+  const u = await findLocalUser(userIdOrEmail.toLowerCase())
+  if(!u) return null
+  return { id: u.id, email: u.email, name: u.name || undefined, plan: 'local' }
   }
   const supabase = getSupabase()
   // Procurar por id OU email

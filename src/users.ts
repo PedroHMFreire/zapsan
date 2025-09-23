@@ -4,7 +4,7 @@ import { supa } from './db'
 // Mantemos compatibilidade mínima exportando tipos semelhantes aos antigos (campos públicos)
 export interface UserPublic {
   id: string
-  phone: string
+  email: string
   name?: string | null
   createdAt: Date
 }
@@ -39,13 +39,13 @@ function verify(password: string, stored?: string | null): Promise<boolean> {
 }
 
 // === Mapeadores ===
-function toPublic(u: any): UserPublic { return { id: u.id, phone: u.phone, name: u.name, createdAt: u.createdAt } }
+function toPublic(u: any): UserPublic { return { id: u.id, email: u.email, name: u.name, createdAt: u.createdAt } }
 
-// === Funções exigidas pela nova API (phone baseado) ===
-export async function createUser({ phone, name, password }: { phone: string; name?: string; password: string }): Promise<UserPublic> {
+// === Funções baseadas em email ===
+export async function createUser({ email, name, password }: { email: string; name?: string; password: string }): Promise<UserPublic> {
+  const emailLc = email.trim().toLowerCase()
   const passwordHash = await hash(password)
-  // Tenta inserção direta; se já existir, detectar conflito e lançar user_exists
-  const { data, error } = await supa.from('users').insert({ phone, name: name || null, passwordHash }).select('*').single()
+  const { data, error } = await supa.from('users').insert({ email: emailLc, name: name || null, passwordHash }).select('*').single()
   if(error){
     const msg = error.message || ''
     if(/duplicate|unique|23505/i.test(msg)) throw new Error('user_exists')
@@ -54,45 +54,46 @@ export async function createUser({ phone, name, password }: { phone: string; nam
   return toPublic(data)
 }
 
-export async function verifyLogin({ phone, password }: { phone: string; password: string }): Promise<{ ok: boolean; user?: UserPublic }> {
-  const { data: u } = await supa.from('users').select('id, phone, name, passwordHash, createdAt').eq('phone', phone).single()
+export async function verifyLogin({ email, password }: { email: string; password: string }): Promise<{ ok: boolean; user?: UserPublic }> {
+  const emailLc = email.trim().toLowerCase()
+  const { data: u } = await supa.from('users').select('id, email, name, passwordHash, createdAt').eq('email', emailLc).single()
   if(!u) return { ok:false }
   const ok = await verify(password, u.passwordHash)
   if(!ok) return { ok:false }
   return { ok:true, user: toPublic(u) }
 }
 
-export async function getUser(idOrPhone: string): Promise<UserPublic | null> {
+export async function getUser(idOrEmail: string): Promise<UserPublic | null> {
   let where: any
-  if(/^[0-9a-fA-F-]{36}$/.test(idOrPhone) || idOrPhone.startsWith('u_')){ // uuid simples ou prefixado
-    where = { id: idOrPhone }
+  if(/^[0-9a-fA-F-]{36}$/.test(idOrEmail) || idOrEmail.startsWith('u_')){ // uuid
+    where = { id: idOrEmail }
   } else {
-    where = { phone: idOrPhone }
+    where = { email: idOrEmail.toLowerCase() }
   }
-  let query = supa.from('users').select('id, phone, name, createdAt')
+  let query = supa.from('users').select('id, email, name, createdAt')
   if(where.id){ query = query.eq('id', where.id) }
-  if(where.phone){ query = query.eq('phone', where.phone) }
+  if(where.email){ query = query.eq('email', where.email) }
   const { data: u } = await query.single()
   if(!u) return null
   return toPublic(u)
 }
 
 export async function listUsers(): Promise<UserPublic[]> {
-  const { data, error } = await supa.from('users').select('id, phone, name, createdAt').order('createdAt', { ascending: false })
+  const { data, error } = await supa.from('users').select('id, email, name, createdAt').order('createdAt', { ascending: false })
   if(error) return []
   return (data||[]).map(toPublic)
 }
 
-export async function updateUser(id: string, patch: { name?: string; phone?: string; password?: string }): Promise<UserPublic> {
+export async function updateUser(id: string, patch: { name?: string; email?: string; password?: string }): Promise<UserPublic> {
   const { data: existing } = await supa.from('users').select('id').eq('id', id).single()
   if(!existing) throw new Error('user_not_found')
   const data: any = {}
   if(typeof patch.name === 'string') data.name = patch.name
-  if(typeof patch.phone === 'string') data.phone = patch.phone
+  if(typeof patch.email === 'string') data.email = patch.email.toLowerCase()
   if(typeof patch.password === 'string' && patch.password){
     data.passwordHash = await hash(patch.password)
   }
-  const { data: updated, error } = await supa.from('users').update(data).eq('id', id).select('id, phone, name, createdAt').single()
+  const { data: updated, error } = await supa.from('users').update(data).eq('id', id).select('id, email, name, createdAt').single()
   if(error || !updated) throw new Error('update_failed')
   return toPublic(updated)
 }
@@ -105,22 +106,23 @@ export async function deleteUser(id: string): Promise<void> {
   }
 }
 
-// Compatibilidade com rotas antigas que usam authenticate / upsertUserIfMissing / findUser
-// Mantemos assinaturas mas redirecionamos para novas funções (mapeando email->phone)
-export async function findUser(phone: string){
-  const { data } = await supa.from('users').select('*').eq('phone', phone).single()
+// Compatibilidade com rotas antigas (mantidas assinaturas auxiliares)
+export async function findUser(email: string){
+  const emailLc = email.toLowerCase()
+  const { data } = await supa.from('users').select('*').eq('email', emailLc).single()
   return data || null
 }
 
-export async function upsertUserIfMissing(name: string, phone: string, password: string){
-  const { data: u } = await supa.from('users').select('*').eq('phone', phone).single()
+export async function upsertUserIfMissing(name: string, email: string, password: string){
+  const emailLc = email.toLowerCase()
+  const { data: u } = await supa.from('users').select('*').eq('email', emailLc).single()
   if(u) return u
-  const created = await createUser({ phone, name, password })
-  return { id: created.id, phone: created.phone, name: created.name, createdAt: created.createdAt }
+  const created = await createUser({ email: emailLc, name, password })
+  return { id: created.id, email: created.email, name: created.name, createdAt: created.createdAt }
 }
 
-export async function authenticate(phone: string, password: string){
-  const { ok, user } = await verifyLogin({ phone, password })
+export async function authenticate(email: string, password: string){
+  const { ok, user } = await verifyLogin({ email, password })
   if(!ok || !user) return null
-  return { id: user.id, phone: user.phone, name: user.name }
+  return { id: user.id, email: user.email, name: user.name }
 }

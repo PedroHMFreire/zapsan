@@ -147,7 +147,7 @@
     const mode = form.dataset.mode
     try {
       setLoading(true)
-      const payload = { email: (email.value||'').trim(), password: pass.value }
+          const payload = { email: (email.value||'').trim().toLowerCase(), password: pass.value }
       if(mode==='register') payload.confirm = pass2.value
       if(mode==='register' && regName.value.trim()) payload.name = regName.value.trim()
       let endpoint = mode==='register' ? '/auth/register' : '/auth/login'
@@ -156,8 +156,8 @@
       const j = await r.json()
       try {
         localStorage.setItem('auth','ok')
-        localStorage.setItem('sessionId', j.sessionId)
-        localStorage.setItem('userId', j.userId)
+            if(j.sessionId) localStorage.setItem('sessionId', j.sessionId)
+            if(j.user?.id) localStorage.setItem('userId', j.user.id)
         if(remember?.checked) localStorage.setItem('remember','1')
       } catch {}
       location.replace('/')
