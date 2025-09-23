@@ -78,14 +78,14 @@
     </section>
   </div>
 
-  <!-- Modal Perfil -->
-  <div class="modal" id="mdl-profile" style="display:none">
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-title">
-      <div class="modal-head">
+  <!-- Drawer Perfil -->
+  <div class="drawer" id="drw-profile">
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+      <div class="drawer-h">
         <h3 id="profile-title" style="margin:0">Perfil</h3>
         <button class="icon-btn" data-close-profile aria-label="Fechar">✖</button>
       </div>
-      <div class="modal-body" id="profile-body">
+      <div class="drawer-b" id="profile-body">
         <div class="section">
           <strong>Usuário:</strong> <span id="pf-user">—</span><br/>
           <strong>Session ID:</strong> <span id="pf-session">—</span>
@@ -105,7 +105,7 @@
           </div>
         </div>
       </div>
-      <div class="modal-foot" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <div class="drawer-f" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
         <button class="btn outline" id="btn-logout">Logout</button>
         <button class="btn" data-close-profile>Fechar</button>
       </div>
@@ -337,7 +337,7 @@
 
   // ===== Perfil =====
   const profileBtn=document.getElementById('profile-btn');
-  const mdlProfile=document.getElementById('mdl-profile');
+  const drwProfile=document.getElementById('drw-profile');
   const pfUser=document.getElementById('pf-user');
   const pfSession=document.getElementById('pf-session');
   const pfPlan=document.getElementById('pf-plan');
@@ -352,9 +352,9 @@
   const btnClean=document.getElementById('btn-clean');
   const btnLogout=document.getElementById('btn-logout');
 
-  function showProfile(){ mdlProfile.style.display='flex'; loadProfile(); }
-  function hideProfile(){ mdlProfile.style.display='none'; }
-  mdlProfile?.addEventListener('click', (e)=>{ if(e.target===mdlProfile) hideProfile(); });
+  function showProfile(){ drwProfile.classList.add('show'); loadProfile(); }
+  function hideProfile(){ drwProfile.classList.remove('show'); }
+  drwProfile?.addEventListener('click', (e)=>{ if(e.target===drwProfile) hideProfile(); });
   document.querySelectorAll('[data-close-profile]').forEach(b=>b.addEventListener('click', hideProfile));
   profileBtn?.addEventListener('click', showProfile);
 
