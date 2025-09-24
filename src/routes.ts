@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
-import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages as getMessagesNew, sendMedia, getAllSessionMeta, cleanLogout, createIdleSession, nukeAllSessions, getSessionStatus, onMessageStream } from './wa'
+import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages as getMessagesNew, sendMedia, getAllSessionMeta, cleanLogout, createIdleSession, nukeAllSessions, getSessionStatus, onMessageStream, allowManualStart } from './wa'
 import { authenticate, upsertUserIfMissing, findUser, createUser } from './users'
 import { registerUser, loginUser, fetchUserProfile } from './supaUsers'
 import multer from 'multer'
@@ -215,14 +215,9 @@ r.post('/sessions/create', async (req: Request, res: Response) => {
     if(!allowed.ok){
       return res.status(429).json({ error: 'rate_limited', scope: allowed.reason })
     }
-    const manual = process.env.MANUAL_PAIRING === '1'
-    if(manual){
-      createIdleSession(sessionId)
-      return res.status(201).json({ ok:true, status: 'idle', manual:true })
-    } else {
-      createOrLoadSession(sessionId).catch(() => {})
-      return res.status(202).json({ ok: true, status: 'creating', manual:false })
-    }
+    // Nunca auto-gerar QR: criar sessão idle sempre
+    createIdleSession(sessionId)
+    return res.status(201).json({ ok:true, status: 'idle', manual: process.env.MANUAL_PAIRING === '1' })
   } catch (err: any) {
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -231,12 +226,13 @@ r.post('/sessions/create', async (req: Request, res: Response) => {
 // Inicia pairing manualmente (gera socket e QR)
 r.post('/sessions/:id/start', async (req: Request, res: Response) => {
   try {
-    if(process.env.MANUAL_PAIRING !== '1') return res.status(400).json({ error: 'not_manual_mode' })
     const { id } = req.params
     const info = getDebug(id)
     if(!info.exists) createIdleSession(id)
     if(info.state && ['pairing','open'].includes(info.state)) return res.status(409).json({ error: 'already_active', state: info.state })
-  await createOrLoadSession(id)
+    // Autoriza start manual e inicia socket (vai gerar QR)
+    allowManualStart(id)
+    await createOrLoadSession(id)
     return res.json({ ok:true, started:true })
   } catch (err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
@@ -505,8 +501,7 @@ r.post('/me/session/clean', async (req: Request, res: Response) => {
   const uid = (req.cookies?.uid) || ''
   if(!uid) return res.status(401).json({ error: 'unauthenticated' })
   const sessionId = await getOrCreateUserSession(uid)
-  const out = await cleanLogout(sessionId, { keepMessages: true })
-  if(!out.ok) return res.status(404).json({ error: out.reason||'not_found' })
+  await cleanLogout(sessionId, { keepMessages: true })
   res.json({ ok:true, cleaned:true })
 })
 
@@ -582,8 +577,7 @@ r.post('/sessions/:id/clean', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const keep = String(req.query.keep||'') === '1'
-    const out = await cleanLogout(id, { keepMessages: keep })
-    if(!out.ok) return res.status(404).json({ error: out.reason || 'not_found' })
+    await cleanLogout(id, { keepMessages: keep })
     res.json({ ok: true, cleaned: true, keptMessages: keep })
   } catch (err: any) {
     res.status(500).json({ error: 'internal_error', message: err?.message })

@@ -99,14 +99,7 @@
       } catch {}
     }
 
-    // Auto-start session if user opened page directly with ?session_id without calling create
-    async function ensureSessionStarted(){
-      if(!id) return;
-      try {
-        await fetch('/sessions/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:id})});
-        try { localStorage.setItem('sessionId', id) } catch {}
-      } catch {}
-    }
+    // Não iniciar automaticamente; entrada nesta página deve ocorrer após clicar em "Gerar QRCode"
 
     // Reset button
     document.getElementById('btn-reset')?.addEventListener('click', async ()=>{
@@ -118,8 +111,7 @@
       } catch { toast('Erro rede reset','err'); }
     });
 
-    ensureSessionStarted();
-    setInterval(pollQR, 3000);
+  setInterval(pollQR, 3000);
     setInterval(pollStatus, 2000);
     pollQR();
     pollStatus();

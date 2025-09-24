@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { supa } from './db'
-import { createOrLoadSession } from './wa'
+// import { createOrLoadSession } from './wa'
 
 // Retorna a sessionId mais recente ou cria uma nova vinculada ao userId
 export async function getOrCreateUserSession(userId: string): Promise<string> {
@@ -42,7 +42,7 @@ export async function setUserSession(userId: string, sessionId: string): Promise
 
 export async function ensureSessionStarted(userId: string): Promise<{ sessionId: string }> {
   const sessionId = await getOrCreateUserSession(userId)
-  createOrLoadSession(sessionId).catch(()=>{})
+  // Não iniciar automaticamente para evitar gerar QR sem ação manual
   return { sessionId }
 }
 

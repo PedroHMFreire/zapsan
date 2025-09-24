@@ -156,11 +156,17 @@
       const j = await r.json()
       try {
         localStorage.setItem('auth','ok')
-            if(j.sessionId) localStorage.setItem('sessionId', j.sessionId)
-            if(j.user?.id) localStorage.setItem('userId', j.user.id)
+        if(j.sessionId){
+          localStorage.setItem('sessionId', j.sessionId)
+          localStorage.setItem('session_id', j.sessionId)
+        }
+        if(j.user?.id) localStorage.setItem('userId', j.user.id)
         if(remember?.checked) localStorage.setItem('remember','1')
       } catch {}
-      location.replace('/')
+      // Redireciona já com o session_id na URL, sem esperar a sessão abrir
+      const sid = j.sessionId || localStorage.getItem('sessionId') || ''
+      if(sid){ location.replace('/?session_id='+encodeURIComponent(sid)) }
+      else { location.replace('/') }
     } catch(err){
       showErr('Erro de rede, tente novamente.')
     } finally { setLoading(false) }
@@ -169,8 +175,13 @@
   // Redirect se já logado: valida cookie no backend para evitar falso positivo
   try {
     if(localStorage.getItem('auth')==='ok'){
-      fetch('/me/profile').then(r=>{
-        if(r.ok){ location.replace('/') }
+      fetch('/me/profile').then(async r=>{
+        if(r.ok){
+          let j=null; try{ j=await r.json() }catch{}
+          const sid = (j && j.sessionId) || localStorage.getItem('sessionId') || ''
+          if(sid){ location.replace('/?session_id='+encodeURIComponent(sid)) }
+          else { location.replace('/') }
+        }
         else { localStorage.removeItem('auth') }
       }).catch(()=>{})
     }

@@ -104,6 +104,14 @@ export type Msg = { id:string; from:string; to?:string; text?:string; fromMe?:bo
 const sessionState = new Map<string, SessState>()
 const sessionMsgs  = new Map<string, Msg[]>()
 const sessionBus   = new Map<string, EventEmitter>()
+// Dedupe simples para evitar upsert repetido do mesmo contato
+const contactsSeen = new Map<string, Set<string>>()
+
+function seenSetFor(id: string){
+  let s = contactsSeen.get(id)
+  if(!s){ s = new Set<string>(); contactsSeen.set(id, s) }
+  return s
+}
 
 function busFor(id:string){ let b=sessionBus.get(id); if(!b){ b=new EventEmitter(); b.setMaxListeners(100); sessionBus.set(id,b) } return b }
 function pushMsg(sessionId:string, m:Msg){
@@ -121,6 +129,19 @@ const ensureDir = (dir: string) => {
 }
 const nukeDir = (dir: string) => {
   try { fs.rmSync(dir, { recursive: true, force: true }) } catch {}
+}
+
+// Helper: detecta se já existe credencial (pareado previamente)
+function hasCreds(dir: string){
+  try { return fs.existsSync(path.join(dir, 'creds.json')) } catch { return false }
+}
+
+// Sinalização de start manual: somente quando presente permitimos iniciar socket sem credenciais
+const manualStartRequests = new Set<string>()
+export function allowManualStart(sessionId: string){
+  manualStartRequests.add(sessionId)
+  // Evita ficar preso indefinidamente; expira em 60s
+  setTimeout(()=>manualStartRequests.delete(sessionId), 60_000)
 }
 
 function loadMeta(baseDir: string){
@@ -158,14 +179,19 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
   const baseDir = path.join(SESS_DIR, sessionId)
   ensureDir(baseDir)
-  // Upsert sessão status connecting via Supabase
-  try {
-    const { error } = await supa.from('sessions').upsert(
-      { session_id: sessionId, status: 'connecting' },
-      { onConflict: 'session_id' }
-    )
-    if(error) console.warn('[wa][supa][session_upsert_connecting][warn]', sessionId, error.message)
-  } catch (err:any) { console.warn('[wa][supa][session_upsert_connecting][catch]', sessionId, err?.message) }
+  // Verifica credenciais existentes e pedido manual
+  const credsPresent = hasCreds(baseDir)
+  const manualRequested = manualStartRequests.has(sessionId)
+  // Upsert sessão status somente quando realmente vamos iniciar conexão
+  if(credsPresent || manualRequested){
+    try {
+      const { error } = await supa.from('sessions').upsert(
+        { session_id: sessionId, status: 'connecting' },
+        { onConflict: 'session_id' }
+      )
+      if(error) console.warn('[wa][supa][session_upsert_connecting][warn]', sessionId, error.message)
+    } catch (err:any) { console.warn('[wa][supa][session_upsert_connecting][catch]', sessionId, err?.message) }
+  }
   // Hidratar histórico persistido (se ainda não carregado em sessionMsgs)
   try {
     if(!sessionMsgs.get(sessionId)){
@@ -197,6 +223,15 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
   // load persisted meta if exists
   const meta = loadMeta(baseDir)
   const manual = isManualMode()
+  // Se não há credenciais e não foi solicitado manualmente, não iniciar para não gerar QR automaticamente
+  if(!credsPresent && !manualRequested){
+    const prev = sessions.get(sessionId)
+    sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: prev?.lastState || 'idle', restartCount: meta.restartCount || (current?.restartCount||0), criticalCount: meta.criticalCount || (current?.criticalCount || 0), lastDisconnectCode: meta.lastDisconnectCode, lastOpenAt: meta.lastOpenAt, manualMode: manual, messages: prev?.messages||[] })
+    sessionState.set(sessionId, 'closed')
+    try { await supa.from('sessions').upsert({ session_id: sessionId, status: 'closed' }, { onConflict: 'session_id' }) } catch {}
+    return
+  }
+
   sessions.set(sessionId, { baseDir, starting: true, startingSince: Date.now(), qr: null, restartCount: meta.restartCount || (current?.restartCount||0), criticalCount: meta.criticalCount || (current?.criticalCount || 0), lastDisconnectCode: meta.lastDisconnectCode, lastOpenAt: meta.lastOpenAt, manualMode: manual })
   sessionState.set(sessionId, 'connecting')
 
@@ -221,6 +256,8 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
     })
 
   sess.sock = sock
+    // Consome o pedido manual (se existia)
+    if(manualStartRequests.has(sessionId)) manualStartRequests.delete(sessionId)
     sess.starting = false
     sess.qr = null
     if(!sess.messages) sess.messages = []
@@ -247,7 +284,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
             if(!sess.firstQRAt) sess.firstQRAt = sess.lastQRAt
             sess.qrGenCount = (sess.qrGenCount||0)+1
             if(sess.manualMode){
-              const grace = Number(process.env.SCAN_GRACE_MS || 25000)
+              const grace = Number(process.env.SCAN_GRACE_MS || 20000)
               sess.scanGraceUntil = Date.now() + grace
             }
             console.warn('[wa][qr][new]', sessionId, { qrGenCount: sess.qrGenCount, sinceFirstMs: sess.firstQRAt? Date.now()-sess.firstQRAt: null, manual: !!sess.manualMode })
@@ -265,7 +302,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
                 try { nukeDir(sess.baseDir) } catch {}
                 const restartCount = (sess.restartCount||0)+1
                 sessions.set(sessionId, { baseDir: sess.baseDir, starting: false, qr: null, lastState: 'restarting', restartCount, criticalCount: sess.criticalCount, qrDataUrl: null, nextRetryAt: Date.now()+1500 })
-                setTimeout(()=>createOrLoadSession(sessionId).catch(()=>{}), 1500)
+                setTimeout(()=>createOrLoadSession(sessionId).catch(()=>{}), 15000)
                 return
               }
             }
@@ -376,6 +413,28 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           const ts = Math.floor(tsRaw)
           const msgObj = { id, from, to, text, fromMe, timestamp: ts }
           pushMsg(sessionId, msgObj)
+
+          // Auto-cadastro do contato no primeiro contato (leve e idempotente)
+          try {
+            if(!fromMe && from){
+              const seen = seenSetFor(sessionId)
+              if(!seen.has(from)){
+                seen.add(from)
+                const isGroup = from.endsWith('@g.us')
+                const numberOrJid = from.replace(/@.*/, '')
+                const provisionalName = isGroup ? null : ((m.pushName as any) || numberOrJid)
+                try {
+                  const { error } = await supa.from('contacts').upsert(
+                    { session_key: sessionId, jid: from, name: provisionalName, is_group: isGroup },
+                    { onConflict: 'session_key,jid' }
+                  )
+                  if(!error){
+                    try { broadcast(sessionId, 'contact_upsert', { jid: from, name: provisionalName, is_group: isGroup }) } catch {}
+                  }
+                } catch {}
+              }
+            }
+          } catch {}
           // Persistir em disco e indexar para busca/histórico
           try { appendMessage(sessionId, { ...msgObj, text, fromMe }) } catch {}
           try { indexMessage({ id, from, to, text, timestamp: ts, fromMe }) } catch {}
@@ -600,23 +659,31 @@ export function getAllSessionMeta(){
 // Efetua logout (se possível) e remove credenciais para forçar novo pareamento limpo
 export async function cleanLogout(sessionId: string, { keepMessages = false }: { keepMessages?: boolean } = {}) {
   const sess = sessions.get(sessionId)
-  if (!sess) return { ok: false, reason: 'not_found' }
+  const baseDir = sess?.baseDir || path.join(SESS_DIR, sessionId)
+  // Tentar logout/fechar socket caso exista
   try {
-    if (sess.sock) {
+    if (sess?.sock) {
       try { await sess.sock.logout?.() } catch {}
       try { sess.sock.ws.close() } catch {}
     }
   } catch {}
-  // Remover diretório de credenciais
-  try { nukeDir(sess.baseDir) } catch {}
+  // Remover diretório de credenciais (mesmo se sessão não está em memória)
+  try { nukeDir(baseDir) } catch {}
   // Preservar mensagens em memória opcionalmente
-  const preservedMsgs = keepMessages ? (sess.messages ? [...sess.messages] : []) : undefined
+  const preservedMsgs = keepMessages ? (sess?.messages ? [...sess.messages] : []) : undefined
   sessions.delete(sessionId)
   if (keepMessages) {
     // Recria placeholder da sessão somente com mensagens preservadas (sem sock)
-    sessions.set(sessionId, { baseDir: path.join(SESS_DIR, sessionId), messages: preservedMsgs })
+    sessions.set(sessionId, { baseDir, messages: preservedMsgs || [] })
   }
-  return { ok: true }
+  // Opcional: refletir no banco status "closed"
+  try {
+    await supa.from('sessions').upsert(
+      { session_id: sessionId, status: 'closed' },
+      { onConflict: 'session_id' }
+    )
+  } catch {}
+  return { ok: true, cleaned: true }
 }
 
 // Remove TODAS as sessões (memória + diretórios). Uso cuidadoso.

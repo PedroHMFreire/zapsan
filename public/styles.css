@@ -34,8 +34,10 @@ a{color:var(--wa-accent);text-decoration:none} a:hover{opacity:.9}
 .input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--wa-border);background:#0e171d;color:var(--text)}
 .card{background:var(--wa-panel);border:1px solid var(--wa-border);border-radius:12px;box-shadow:var(--shadow);padding:16px}
 .topbar{position:sticky;top:0;background:var(--wa-green-dark);border-bottom:1px solid #06473f;color:#fff}
-.topbar-inner{display:flex;align-items:center;justify-content:space-between;padding:10px 14px}
-.brand{display:flex;gap:10px;align-items:center;font-weight:800}
+.topbar-inner{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:10px 14px;gap:8px}
+.top-left{display:flex;gap:8px;align-items:center}
+.top-right{display:flex;gap:8px;align-items:center;justify-self:end}
+.brand{display:flex;gap:10px;align-items:center;font-weight:900;letter-spacing:.3px;justify-self:center}
 /* App Layout */
 .app{display:grid;grid-template-columns:360px 1fr;min-height:100vh}
 .sidebar{background:var(--wa-panel);border-right:1px solid var(--wa-border);display:flex;flex-direction:column;min-width:0}
@@ -200,4 +202,16 @@ button:focus-visible, .input:focus-visible, .chip:focus-visible{outline:2px soli
 .chat-item .star-btn:hover{color:var(--wa-accent,#25d366)}
 .chat-item .name{display:flex;align-items:center;gap:4px}
 [data-theme='light'] .chat-item .unread{box-shadow:0 0 0 1px #fff}
+
+/* Hamburger dropdown */
+.dropdown{position:relative}
+.dropdown-menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--wa-panel);border:1px solid var(--wa-border);border-radius:10px;box-shadow:var(--shadow);display:none;min-width:180px;overflow:hidden}
+.dropdown-left .dropdown-menu{left:0;right:auto}
+.dropdown.show .dropdown-menu{display:block}
+.dropdown-menu .menu-item{display:block;width:100%;text-align:left;background:transparent;border:0;color:var(--text);padding:10px 12px;cursor:pointer}
+.dropdown-menu .menu-item:hover{background:rgba(255,255,255,.06)}
+
+/* Theme toggle icon (sun/moon) */
+#theme-toggle::before{content:'\2600';} /* sun */
+[data-theme='light'] #theme-toggle::before{content:'\1F319';} /* moon */
 
