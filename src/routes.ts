@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
-import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages as getMessagesNew, sendMedia, getAllSessionMeta, cleanLogout, createIdleSession, nukeAllSessions, getSessionStatus, onMessageStream, allowManualStart } from './wa'
+import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages as getMessagesNew, sendMedia, getAllSessionMeta, cleanLogout, createIdleSession, nukeAllSessions, getSessionStatus, onMessageStream, allowManualStart, getProfilePicture } from './wa'
 import { authenticate, upsertUserIfMissing, findUser, createUser } from './users'
 import { registerUser, loginUser, fetchUserProfile } from './supaUsers'
 import multer from 'multer'
@@ -393,14 +393,21 @@ r.get('/sessions/:id/contacts', async (req: Request, res: Response) => {
 
 // Enviar texto via WhatsApp
 r.post('/messages/send', async (req: Request, res: Response) => {
+  console.log('[messages/send] Headers:', req.headers.cookie)
+  console.log('[messages/send] Body:', req.body)
+  
   try {
     const { to, text } = req.body || {}
     const userId = (req.cookies?.uid) || String(req.body?.user||'')
+    console.log('[messages/send] userId extraído:', userId)
+    
     if(!userId) return res.status(401).json({ error: 'unauthenticated' })
     if (!to || !text) {
       return res.status(400).json({ error: 'bad_request', message: 'to e text são obrigatórios' })
     }
   const session_id = await getOrCreateUserSession(userId)
+  console.log('[messages/send] session_id:', session_id)
+  
     const quota = checkQuota(userId, session_id)
     if(!quota.ok){
       return res.status(429).json({ error: 'quota_exceeded', remaining: 0, plan: quota.plan })
@@ -416,6 +423,8 @@ r.post('/messages/send', async (req: Request, res: Response) => {
     } else {
       await createOrLoadSession(String(session_id))
     }
+    
+    console.log('[messages/send] Chamando sendText...')
     await sendText(String(session_id), String(to), String(text))
     recordMessage(session_id)
     return res.json({ ok: true })
@@ -503,6 +512,98 @@ r.post('/me/session/clean', async (req: Request, res: Response) => {
   const sessionId = await getOrCreateUserSession(uid)
   await cleanLogout(sessionId, { keepMessages: true })
   res.json({ ok:true, cleaned:true })
+})
+
+// Buscar contatos salvos da sessão do usuário
+r.get('/me/contacts', async (req: Request, res: Response) => {
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  
+  try {
+    const sessionId = await getOrCreateUserSession(uid)
+    const { data: contacts, error } = await supa
+      .from('contacts')
+      .select('jid, name, is_group')
+      .eq('session_key', sessionId)
+      .order('name')
+    
+    if(error) {
+      console.warn('[contacts][fetch][error]', error.message)
+      return res.status(500).json({ error: 'database_error' })
+    }
+    
+    res.json({ contacts: contacts || [] })
+  } catch (err: any) {
+    console.warn('[contacts][fetch][catch]', err?.message)
+    res.status(500).json({ error: 'internal_error' })
+  }
+})
+
+// Deletar contato específico da sessão do usuário
+r.delete('/me/contacts/:jid', async (req: Request, res: Response) => {
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  
+  try {
+    const sessionId = await getOrCreateUserSession(uid)
+    const jid = decodeURIComponent(req.params.jid)
+    
+    const { error } = await supa
+      .from('contacts')
+      .delete()
+      .eq('session_key', sessionId)
+      .eq('jid', jid)
+    
+    if(error) {
+      console.warn('[contacts][delete][error]', error.message)
+      return res.status(500).json({ error: 'database_error' })
+    }
+    
+    res.json({ ok: true, deleted_jid: jid })
+  } catch (err: any) {
+    console.warn('[contacts][delete][catch]', err?.message)
+    res.status(500).json({ error: 'internal_error' })
+  }
+})
+
+// Buscar foto de perfil de um contato
+r.get('/contacts/:jid/photo', async (req: Request, res: Response) => {
+  const uid = (req.cookies?.uid) || ''
+  if(!uid) return res.status(401).json({ error: 'unauthenticated' })
+  
+  try {
+    const sessionId = await getOrCreateUserSession(uid)
+    const jid = decodeURIComponent(req.params.jid)
+    const type = req.query.type === 'image' ? 'image' : 'preview' // high or low res
+    
+    console.log(`Fetching profile picture for ${jid} (${type})`)
+    
+    const status = getSessionStatus(sessionId)
+    if (status.state !== 'open') {
+      return res.status(400).json({
+        error: 'whatsapp_not_connected',
+        message: 'WhatsApp session not connected'
+      })
+    }
+
+    try {
+      const profileUrl = await getProfilePicture(sessionId, jid, type)
+      
+      res.json({
+        success: true,
+        profileUrl
+      })
+    } catch (error: any) {
+      console.warn('[photo][fetch][error]', error.message)
+      res.status(500).json({
+        error: 'fetch_error',
+        message: error.message
+      })
+    }
+  } catch (err: any) {
+    console.warn('[photo][fetch][catch]', err?.message)
+    res.status(500).json({ error: 'internal_error' })
+  }
 })
 
 function localStorageClearHint(res: Response){

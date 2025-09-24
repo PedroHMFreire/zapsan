@@ -140,6 +140,48 @@
     </div>
   </div>
 
+  <!-- Modal Nova Conversa -->
+  <div class="modal" id="new-chat-modal" aria-hidden="true">
+    <div class="modal-content">
+      <div class="modal-h">
+        <h3>Nova Conversa</h3>
+        <button type="button" class="close-btn" data-close-new-chat aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="new-chat-form">
+          <div class="field">
+            <label for="phone-input">Número do telefone:</label>
+            <input type="text" id="phone-input" class="input" placeholder="+55 98 99999-9999" maxlength="20">
+            <div class="validation-feedback" id="phone-validation" style="margin-top: 8px; font-size: 14px; display: none;"></div>
+            <div class="help">Digite o número completo. Para celulares, incluir o 9º dígito</div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-f">
+        <button type="button" class="btn outline" data-close-new-chat>Cancelar</button>
+        <button type="submit" form="new-chat-form" class="btn" id="create-chat-btn">Iniciar Conversa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Confirmar Exclusão -->
+  <div class="modal" id="delete-contact-modal" aria-hidden="true">
+    <div class="modal-content">
+      <div class="modal-h">
+        <h3>Excluir Conversa</h3>
+        <button type="button" class="close-btn" data-close-delete aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <p>Tem certeza que deseja excluir a conversa com <strong id="delete-contact-name">este contato</strong>?</p>
+        <p class="help">Esta ação não pode ser desfeita.</p>
+      </div>
+      <div class="modal-f">
+        <button type="button" class="btn outline" data-close-delete>Cancelar</button>
+        <button type="button" class="btn danger" id="confirm-delete-btn">Excluir</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   // Util toast
   function toast(msg,type='ok'){
@@ -154,6 +196,7 @@
   // Estado dinâmico: chats (Map) e mensagens por JID
   const chatsMap = new Map(); // jid -> { id, name, last, time, unread, starred }
   const messagesByJid = new Map(); // jid -> [ { id,text,fromMe,timestamp } ]
+  const contactsMap = new Map(); // jid -> { name, is_group }
   let activeFilter='all';
   let currentChat=null; // objeto { id, name }
   const app=document.getElementById('app');
@@ -168,29 +211,281 @@
   let msgSeq=0; // contador sintético para IDs de mensagens
   const LS_CHAT_KEY='last_chat_id';
 
-  function renderChatList(){
+  // Buscar contatos salvos do backend
+  async function loadContacts() {
+    try {
+      const response = await fetch('/me/contacts');
+      if (response.ok) {
+        const data = await response.json();
+        contactsMap.clear();
+        data.contacts.forEach(contact => {
+          contactsMap.set(contact.jid, {
+            name: contact.name,
+            is_group: contact.is_group
+          });
+        });
+        console.log('Contatos carregados:', contactsMap.size);
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar contatos:', err);
+    }
+  }
+
+  // Função para formatar JID em nome legível
+  function formatContactName(jid) {
+    const contact = contactsMap.get(jid);
+    if (contact && contact.name) {
+      return contact.name;
+    }
+    
+    // Fallback: extrair número do JID se não tiver nome salvo
+    if (jid && jid.includes('@')) {
+      const number = jid.split('@')[0];
+      // Se é um número brasileiro, formatar melhor
+      if (number.startsWith('55') && number.length >= 12) {
+        return `+${number.substr(0,2)} ${number.substr(2,2)} ${number.substr(4,5)}-${number.substr(9)}`;
+      }
+      return `+${number}`;
+    }
+    
+    return jid || 'Desconhecido';
+  }
+
+  // Cache de fotos de perfil
+  const profilePhotosCache = new Map();
+
+  // Função para buscar foto de perfil
+  async function getProfilePhoto(jid, type = 'preview') {
+    const cacheKey = `${jid}_${type}`;
+    
+    // Verificar cache primeiro
+    if (profilePhotosCache.has(cacheKey)) {
+      return profilePhotosCache.get(cacheKey);
+    }
+    
+    try {
+      const response = await fetch(`/contacts/${encodeURIComponent(jid)}/photo?type=${type}`);
+      if (response.ok) {
+        const data = await response.json();
+        const photoUrl = data.success ? data.profileUrl : null;
+        
+        // Guardar no cache (null também é válido)
+        profilePhotosCache.set(cacheKey, photoUrl);
+        
+        return photoUrl;
+      }
+    } catch (error) {
+      console.warn('Erro ao buscar foto de perfil:', error);
+    }
+    
+    // Em caso de erro, cachear null
+    profilePhotosCache.set(cacheKey, null);
+    return null;
+  }
+
+  // Função para criar avatar com foto ou iniciais
+  async function createAvatarElement(jid) {
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'avatar';
+    
+    try {
+      const photoUrl = await getProfilePhoto(jid, 'preview');
+      
+      if (photoUrl) {
+        // Usar foto de perfil
+        avatarEl.style.backgroundImage = `url("${photoUrl}")`;
+        avatarEl.style.backgroundSize = 'cover';
+        avatarEl.style.backgroundPosition = 'center';
+        avatarEl.innerHTML = ''; // Limpar conteúdo
+      } else {
+        // Usar iniciais
+        const displayName = formatContactName(jid);
+        const initials = displayName.split(' ')
+          .map(word => word.charAt(0).toUpperCase())
+          .join('')
+          .substring(0, 2);
+        
+        avatarEl.textContent = initials;
+        avatarEl.style.backgroundImage = 'none';
+      }
+    } catch (error) {
+      // Em caso de erro, usar iniciais
+      const displayName = formatContactName(jid);
+      const initials = displayName.split(' ')
+        .map(word => word.charAt(0).toUpperCase())
+        .join('')
+        .substring(0, 2);
+      
+      avatarEl.textContent = initials;
+      avatarEl.style.backgroundImage = 'none';
+    }
+    
+    return avatarEl;
+  }
+
+  // Função para normalizar números brasileiros
+  function normalizeBrazilianPhone(phone) {
+    // Remove todos os caracteres não numéricos
+    const digits = phone.replace(/\D/g, '');
+    
+    // Se já tem @ é um JID, retorna como está
+    if (phone.includes('@')) return phone;
+    
+    // Se não começa com 55, assume Brasil e adiciona
+    let workingDigits = digits;
+    if (!workingDigits.startsWith('55')) {
+      workingDigits = '55' + digits;
+    }
+    
+    // Remove código do país (55)
+    const withoutCountry = workingDigits.slice(2);
+    
+    // Se tem menos de 10 dígitos, número inválido
+    if (withoutCountry.length < 10) {
+      return null; // Número inválido
+    }
+    
+    // Extrai DDD e resto do número
+    const ddd = withoutCountry.slice(0, 2);
+    const rest = withoutCountry.slice(2);
+    
+    // Valida DDD (11-99)
+    const dddNum = parseInt(ddd);
+    if (dddNum < 11 || dddNum > 99) {
+      return null; // DDD inválido
+    }
+    
+    // Se tem 8 dígitos, é telefone fixo
+    if (rest.length === 8) {
+      return `55${ddd}${rest}`;
+    }
+    
+    // Se tem 9 dígitos mas não começa com 9, adiciona 9
+    if (rest.length === 8) {
+      return `55${ddd}9${rest}`;
+    }
+    
+    // Se tem 9 dígitos e já começa com 9, mantém
+    if (rest.length === 9 && rest.startsWith('9')) {
+      return workingDigits;
+    }
+    
+    // Se tem 9 dígitos mas não começa com 9, adiciona 9
+    if (rest.length === 9 && !rest.startsWith('9')) {
+      return `55${ddd}9${rest}`;
+    }
+    
+    return workingDigits;
+  }
+
+  // Função para formatar número para exibição
+  function formatPhoneDisplay(phone) {
+    const digits = phone.replace(/\D/g, '');
+    
+    if (digits.startsWith('55') && digits.length >= 12) {
+      const ddd = digits.slice(2, 4);
+      const first = digits.slice(4, 9);
+      const second = digits.slice(9);
+      return `+55 ${ddd} ${first}-${second}`;
+    }
+    
+    return phone;
+  }
+
+  // Função para validar formato brasileiro obrigatório: 55 + DDD + 9 + 8 dígitos
+  function validateBrazilianPhone(phone) {
+    // Remove todos os caracteres não numéricos
+    const digits = phone.replace(/\D/g, '');
+    
+    // Deve ter exatamente 13 dígitos (55 + 2 DDD + 1 nono dígito + 8 números)
+    if (digits.length !== 13) {
+      return {
+        valid: false,
+        message: 'Número deve ter 13 dígitos: 55 + DDD + 9 + 8 números',
+        normalized: null
+      };
+    }
+    
+    // Deve começar com 55 (código do Brasil)
+    if (!digits.startsWith('55')) {
+      return {
+        valid: false,
+        message: 'Número deve começar com 55 (código do Brasil)',
+        normalized: null
+      };
+    }
+    
+    // Extrai DDD (dígitos 3 e 4)
+    const ddd = digits.slice(2, 4);
+    const dddNumber = parseInt(ddd);
+    
+    // Verifica se é um DDD válido (11-99)
+    if (dddNumber < 11 || dddNumber > 99) {
+      return {
+        valid: false,
+        message: 'DDD inválido. Deve estar entre 11 e 99',
+        normalized: null
+      };
+    }
+    
+    // Verifica se o 5º dígito é 9 (nono dígito obrigatório para celulares)
+    const ninthDigit = digits[4];
+    if (ninthDigit !== '9') {
+      return {
+        valid: false,
+        message: 'Número de celular deve ter o 9º dígito. Formato: 55 + DDD + 9 + 8 números',
+        normalized: null
+      };
+    }
+    
+    return {
+      valid: true,
+      message: 'Número válido',
+      normalized: digits,
+      formatted: formatPhoneDisplay(digits)
+    };
+  }
+
+  async function renderChatList(){
     listEl.innerHTML='';
     const lastId = localStorage.getItem(LS_CHAT_KEY);
     const chatsArr = Array.from(chatsMap.values()).sort((a,b)=> (b.timestamp||0)-(a.timestamp||0));
-    chatsArr.filter(c=>{
+    
+    const filteredChats = chatsArr.filter(c=>{
       if(activeFilter==='unread') return (c.unread||0) > 0;
       if(activeFilter==='starred') return !!c.starred;
       return true;
-    }).forEach(c => {
+    });
+
+    // Renderizar chats um por vez para carregar fotos
+    for (const c of filteredChats) {
       const item = document.createElement('div');
       item.className='chat-item';
       if(currentChat && currentChat.id===c.id) item.classList.add('is-active');
       if(!currentChat && lastId && lastId===c.id) item.classList.add('is-active');
+      
       const unreadBadge = (c.unread||0) > 0 ? `<span class="unread">${c.unread}</span>` : '';
       const star = `<button class="star-btn" data-star="${c.id}" aria-label="Marcar favorito">${c.starred?'★':'☆'}</button>`;
-      item.innerHTML = `<div class="avatar"></div><div class="meta"><div class="name">${c.name||c.id} ${star}</div><div class="last">${escapeHtml(c.last||'')}</div></div><div class="time">${c.time||''} ${unreadBadge}</div>`;
+      const deleteBtn = `<button class="delete-btn" data-delete="${c.id}" aria-label="Excluir conversa" title="Excluir conversa">🗑️</button>`;
+      const displayName = formatContactName(c.id);
+      
+      // Criar avatar com foto
+      const avatarEl = await createAvatarElement(c.id);
+      
+      item.innerHTML = `<div class="meta"><div class="name">${displayName} <div class="actions">${star}${deleteBtn}</div></div><div class="last">${escapeHtml(c.last||'')}</div></div><div class="time">${c.time||''} ${unreadBadge}</div>`;
+      
+      // Inserir avatar no início
+      item.insertBefore(avatarEl, item.firstChild);
+      
       item.addEventListener('click',(ev)=>{
         const target = ev.target;
-        if(target && target.closest && target.closest('.star-btn')) return;
+        if(target && target.closest && (target.closest('.star-btn') || target.closest('.delete-btn'))) return;
         selectChat(c.id);
       });
+      
       listEl.appendChild(item);
-    })
+    }
+    
     // estrela toggle
     listEl.querySelectorAll('.star-btn').forEach(btn=>{
       btn.addEventListener('click', function(e){
@@ -200,24 +495,101 @@
         if(chat){ chat.starred=!chat.starred; renderChatList(); }
       })
     })
+    // delete toggle
+    listEl.querySelectorAll('.delete-btn').forEach(btn=>{
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        const jid = this.getAttribute('data-delete');
+        openDeleteModal(jid);
+      })
+    })
   }
+
+  // Variável para guardar JID a ser deletado
+  let contactToDelete = null;
+
+  // Abrir modal de confirmação de exclusão
+  function openDeleteModal(jid) {
+    contactToDelete = jid;
+    const displayName = formatContactName(jid);
+    document.getElementById('delete-contact-name').textContent = displayName;
+    document.getElementById('delete-contact-modal').setAttribute('aria-hidden', 'false');
+  }
+
+  // Fechar modal de exclusão
+  document.querySelectorAll('[data-close-delete]').forEach(btn => {
+    btn.onclick = () => {
+      document.getElementById('delete-contact-modal').setAttribute('aria-hidden', 'true');
+      contactToDelete = null;
+    };
+  });
+
+  // Confirmar exclusão
+  document.getElementById('confirm-delete-btn').onclick = async () => {
+    if (!contactToDelete) return;
+    
+    try {
+      const response = await fetch(`/me/contacts/${encodeURIComponent(contactToDelete)}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        // Remover do frontend
+        chatsMap.delete(contactToDelete);
+        messagesByJid.delete(contactToDelete);
+        contactsMap.delete(contactToDelete);
+        
+        // Se era o chat ativo, limpar seleção
+        if (currentChat && currentChat.id === contactToDelete) {
+          currentChat = null;
+          peerName.textContent = 'Selecione uma conversa';
+          messagesEl.innerHTML = '';
+          if (window.matchMedia('(max-width:1023px)').matches) {
+            delete app.dataset.view;
+            backBtn.style.display = 'none';
+          }
+        }
+        
+        renderChatList();
+        toast('Conversa excluída com sucesso');
+      } else {
+        throw new Error('Erro ao excluir');
+      }
+    } catch (err) {
+      console.error('Erro ao excluir contato:', err);
+      toast('Erro ao excluir conversa', 'err');
+    }
+    
+    // Fechar modal
+    document.getElementById('delete-contact-modal').setAttribute('aria-hidden', 'true');
+    contactToDelete = null;
+  };
 
   function escapeHtml(t){ return t.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]||c)) }
 
-  function selectChat(jid){
+  async function selectChat(jid){
     const chat = chatsMap.get(jid);
     if(!chat) return;
     currentChat = chat;
     localStorage.setItem(LS_CHAT_KEY, chat.id);
     chat.unread = 0;
-    peerName.textContent = chat.name || chat.id;
+    peerName.textContent = formatContactName(jid);
+    
+    // Atualizar avatar do cabeçalho
+    const headerAvatar = document.querySelector('.c-header .avatar');
+    if (headerAvatar) {
+      const newAvatar = await createAvatarElement(jid);
+      headerAvatar.replaceWith(newAvatar);
+    }
+    
     messagesEl.innerHTML='';
     const msgs = messagesByJid.get(jid)||[];
     msgs.sort((a,b)=>a.timestamp-b.timestamp).forEach(m=>pushMsg(m.fromMe?'out':'in', m.text, m.id));
     if(window.matchMedia('(max-width:1023px)').matches){ app.dataset.view='chat'; backBtn.style.display='inline-block'; }
     document.querySelectorAll('.chat-item').forEach(el=>el.classList.remove('is-active'));
+    const displayName = formatContactName(jid);
     requestAnimationFrame(()=>{
-      [...document.querySelectorAll('.chat-item')].find(el=>el.textContent.includes(chat.name||chat.id))?.classList.add('is-active');
+      [...document.querySelectorAll('.chat-item')].find(el=>el.textContent.includes(displayName))?.classList.add('is-active');
     })
     scrollBottom();
     renderChatList(); // atualiza contadores
@@ -321,8 +693,140 @@
     }
   });
 
-  // New chat just demonstrates toast
-  document.getElementById('new-chat').onclick=()=>toast('Funcionalidade futura');
+  // Nova conversa - abrir modal
+  document.getElementById('new-chat').onclick = () => {
+    document.getElementById('new-chat-modal').setAttribute('aria-hidden', 'false');
+    document.getElementById('phone-input').focus();
+  };
+
+  // Fechar modal nova conversa
+  document.querySelectorAll('[data-close-new-chat]').forEach(btn => {
+    btn.onclick = () => {
+      document.getElementById('new-chat-modal').setAttribute('aria-hidden', 'true');
+      document.getElementById('new-chat-form').reset();
+    };
+  });
+
+  // Validar e formatar número de telefone
+  function formatPhone(input) {
+    // Remove tudo exceto números
+    let numbers = input.replace(/\D/g, '');
+    
+    // Se começar com 55, é brasileiro
+    if (numbers.startsWith('55') && numbers.length >= 12) {
+      return `+55 ${numbers.substr(2,2)} ${numbers.substr(4,5)}-${numbers.substr(9,4)}`;
+    }
+    
+    // Outros países - formato genérico
+    if (numbers.length >= 10) {
+      return `+${numbers}`;
+    }
+    
+    return input;
+  }
+
+  function phoneToJid(phone) {
+    // Remove tudo exceto números
+    const numbers = phone.replace(/\D/g, '');
+    
+    // Validar se tem pelo menos 10 dígitos
+    if (numbers.length < 10) return null;
+    
+    return `${numbers}@s.whatsapp.net`;
+  }
+
+  // Auto-formatação e validação em tempo real
+  document.getElementById('phone-input').addEventListener('input', (e) => {
+    const value = e.target.value.trim();
+    const feedback = document.getElementById('phone-validation');
+    const createBtn = document.getElementById('create-chat-btn');
+    
+    if (!value) {
+      feedback.style.display = 'none';
+      createBtn.disabled = false;
+      return;
+    }
+    
+    const validation = validateBrazilianPhone(value);
+    feedback.style.display = 'block';
+    
+    if (validation.valid) {
+      feedback.style.color = '#22c55e'; // Verde
+      feedback.textContent = `✓ ${validation.formatted} (${validation.message})`;
+      createBtn.disabled = false;
+    } else {
+      feedback.style.color = '#ef4444'; // Vermelho
+      feedback.textContent = `✗ ${validation.message}`;
+      createBtn.disabled = true;
+    }
+  });
+
+  // Criar nova conversa com validação melhorada
+  document.getElementById('new-chat-form').onsubmit = (e) => {
+    e.preventDefault();
+    
+    const phoneInput = document.getElementById('phone-input');
+    const phone = phoneInput.value.trim();
+    
+    if (!phone) {
+      toast('Digite um número de telefone', 'err');
+      return;
+    }
+    
+    // Validar com nova função
+    const validation = validateBrazilianPhone(phone);
+    
+    if (!validation.valid) {
+      toast(validation.message, 'err');
+      return;
+    }
+    
+    const jid = `${validation.normalized}@s.whatsapp.net`;
+    
+    // Mostrar preview do número normalizado
+    toast(`Criando conversa para: ${validation.formatted}`, 'ok');
+    
+    // Fechar modal
+    document.getElementById('new-chat-modal').setAttribute('aria-hidden', 'true');
+    
+    // Criar ou abrir conversa
+    createNewChat(jid, validation.formatted);
+    
+    // Reset form
+    phoneInput.value = '';
+  };
+
+  function createNewChat(jid, displayPhone) {
+    // Verificar se já existe
+    if (chatsMap.has(jid)) {
+      selectChat(jid);
+      toast('Conversa já existe!');
+      return;
+    }
+    
+    // Criar nova conversa
+    const newChat = {
+      id: jid,
+      name: jid,
+      last: '',
+      time: '',
+      unread: 0,
+      starred: false,
+      timestamp: Date.now()
+    };
+    
+    chatsMap.set(jid, newChat);
+    messagesByJid.set(jid, []);
+    
+    // Adicionar nome formatado ao mapa de contatos se não existir
+    if (!contactsMap.has(jid)) {
+      contactsMap.set(jid, { name: displayPhone, is_group: false });
+    }
+    
+    renderChatList();
+    selectChat(jid);
+    toast('Nova conversa criada!');
+  }
 
   // Filter chips
   document.querySelectorAll('.s-filters .chip').forEach(chip=>{
@@ -543,6 +1047,10 @@
   async function loadInitial(){
     const sessionId = localStorage.getItem('session_id');
     if(!sessionId) return;
+    
+    // Carregar contatos salvos primeiro
+    await loadContacts();
+    
     // aguardar até estado open (tentativa leve)
     try {
       const st = await fetch(`/sessions/${encodeURIComponent(sessionId)}/status`).then(r=>r.ok?r.json():null);
@@ -596,6 +1104,22 @@
   }
   function handleSSE(ev){
     if(ev.type==='ready'){ return; }
+    if(ev.type==='contact_upsert'){ // novo contato salvo
+      const contact = ev.contact || ev;
+      if(contact.jid && contact.name) {
+        contactsMap.set(contact.jid, {
+          name: contact.name,
+          is_group: contact.is_group || false
+        });
+        // Re-renderizar lista para atualizar nomes se necessário
+        renderChatList();
+        // Se é o chat ativo, atualizar cabeçalho também
+        if(currentChat && currentChat.id === contact.jid) {
+          peerName.textContent = formatContactName(contact.jid);
+        }
+      }
+      return;
+    }
     if(ev.type==='message'){ // nova mensagem
       const m = ev.message || ev;
       const jid = m.fromMe ? (m.to || m.from) : m.from;

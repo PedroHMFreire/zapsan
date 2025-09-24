@@ -98,6 +98,40 @@ type Sess = {
 
 const sessions = new Map<string, Sess>()
 const isManualMode = () => process.env.MANUAL_PAIRING === '1'
+
+// Função para validar formato brasileiro obrigatório: 55 + DDD + 9 + 8 dígitos
+function normalizeBrazilianPhone(phone: string): string {
+  // Remove todos os caracteres não numéricos
+  const digits = phone.replace(/\D/g, '')
+  
+  // Deve ter exatamente 13 dígitos (55 + 2 DDD + 1 nono dígito + 8 números)
+  if (digits.length !== 13) {
+    throw new Error('Número deve ter 13 dígitos: 55 + DDD + 9 + 8 números')
+  }
+  
+  // Deve começar com 55 (código do Brasil)
+  if (!digits.startsWith('55')) {
+    throw new Error('Número deve começar com 55 (código do Brasil)')
+  }
+  
+  // Extrai DDD (dígitos 3 e 4)
+  const ddd = digits.slice(2, 4)
+  const dddNumber = parseInt(ddd)
+  
+  // Verifica se é um DDD válido (11-99)
+  if (dddNumber < 11 || dddNumber > 99) {
+    throw new Error('DDD inválido. Deve estar entre 11 e 99')
+  }
+  
+  // Verifica se o 5º dígito é 9 (nono dígito obrigatório para celulares)
+  const ninthDigit = digits[4]
+  if (ninthDigit !== '9') {
+    throw new Error('Número de celular deve ter o 9º dígito. Formato: 55 + DDD + 9 + 8 números')
+  }
+  
+  // Se passou por todas as validações, retorna o número
+  return digits
+}
 // ---- Novos tipos e estruturas de sync simplificado ----
 export type SessState = 'closed' | 'connecting' | 'open'
 export type Msg = { id:string; from:string; to?:string; text?:string; fromMe?:boolean; timestamp:number }
@@ -558,11 +592,47 @@ export async function sendText(sessionId: string, to: string, text: string) {
   const s = sessions.get(sessionId)
   if (!s?.sock) throw new Error('session_not_found')
 
-  const jid = to.includes('@s.whatsapp.net') || to.includes('@g.us')
-    ? to
-    : `${to.replace(/\D/g, '')}@s.whatsapp.net`
+  let jid: string
+  if (to.includes('@s.whatsapp.net') || to.includes('@g.us')) {
+    jid = to
+  } else {
+    try {
+      // Valida formato brasileiro obrigatório: 55 + DDD + 9 + 8 dígitos
+      const normalizedPhone = normalizeBrazilianPhone(to)
+      jid = `${normalizedPhone}@s.whatsapp.net`
+    } catch (error: any) {
+      console.log(`[sendText] ❌ Erro de validação: ${error.message}`)
+      throw new Error(`Formato de número inválido: ${error.message}`)
+    }
+  }
 
-  await s.sock.sendMessage(jid, { text })
+  console.log(`[sendText] Original: ${to} → Normalizado: ${jid}`)
+  console.log(`[sendText] Enviando para ${jid}: ${text}`)
+  
+  try {
+    await s.sock.sendMessage(jid, { text })
+    console.log(`[sendText] ✅ Mensagem enviada com sucesso para ${jid}`)
+  } catch (error: any) {
+    console.error(`[sendText] ❌ Erro ao enviar para ${jid}:`, error.message)
+    throw error
+  }
+}
+
+// Buscar foto de perfil de um contato
+export async function getProfilePicture(sessionId: string, jid: string, type: 'preview' | 'image' = 'preview'): Promise<string | null> {
+  const s = sessions.get(sessionId)
+  if (!s?.sock) throw new Error('session_not_found')
+
+  try {
+    const profileUrl = await s.sock.profilePictureUrl(jid, type)
+    return profileUrl || null
+  } catch (error: any) {
+    // Se não existe foto de perfil, Baileys retorna erro 404
+    if (error.output?.statusCode === 404 || error.message?.includes('item-not-found')) {
+      return null
+    }
+    throw error
+  }
 }
 
 // Envio de mídia genérico
