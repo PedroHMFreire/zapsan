@@ -24,11 +24,14 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "esbuild": "^0.25.10",
     "express": "^4.19.2",
+    "mime-types": "^3.0.1",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "pino": "^9.4.0",
     "qrcode": "^1.5.4",
+    "sharp": "^0.34.4",
     "yaml": "^2.5.1"
   },
   "devDependencies": {

@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 // Update the import to match the actual exported member names from './wa'
 const wa_1 = require("./wa");
+const mediaProcessor_1 = require("./mediaProcessor");
 const supaUsers_1 = require("./supaUsers");
 const multer_1 = __importDefault(require("multer"));
 const fs_1 = __importDefault(require("fs"));
@@ -697,6 +698,47 @@ r.post('/messages/media', upload.single('file'), async (req, res) => {
     catch (err) {
         const code = err?.message === 'session_not_found' ? 404 : 500;
         return res.status(code).json({ error: err?.message || 'internal_error' });
+    }
+    finally {
+        // Limpar arquivo temporário
+        if (req.file?.path) {
+            try {
+                fs_1.default.unlinkSync(req.file.path);
+            }
+            catch { }
+        }
+    }
+});
+// Servir thumbnails de mídia
+r.get('/media/thumbnail/:hash', (req, res) => {
+    const hash = req.params.hash;
+    const thumbnailPath = path_1.default.join(process.cwd(), 'data', 'media', 'thumbnails', hash);
+    (0, mediaProcessor_1.serveMedia)(thumbnailPath, res);
+});
+// Servir previews de mídia
+r.get('/media/preview/:hash', (req, res) => {
+    const hash = req.params.hash;
+    const previewPath = path_1.default.join(process.cwd(), 'data', 'media', 'previews', hash);
+    (0, mediaProcessor_1.serveMedia)(previewPath, res);
+});
+// Servir mídia original
+r.get('/media/original/:sessionId/:messageId', async (req, res) => {
+    try {
+        const { sessionId, messageId } = req.params;
+        // Verificar autenticação (implementar se necessário)
+        // const uid = await verifyUser(req)
+        // if (!uid) return res.status(401).json({ error: 'unauthenticated' })
+        // Buscar mensagem no store para obter caminho da mídia
+        const messages = (0, wa_1.getMessages)(sessionId, 1000);
+        const message = messages.find(m => m.id === messageId);
+        if (!message || !message.mediaPath) {
+            return res.status(404).json({ error: 'media_not_found' });
+        }
+        (0, mediaProcessor_1.serveMedia)(message.mediaPath, res);
+    }
+    catch (err) {
+        console.warn('[media][original][serve][error]', err?.message);
+        res.status(500).json({ error: 'serve_error' });
     }
 });
 // Status da sessão

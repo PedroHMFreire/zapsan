@@ -22,6 +22,7 @@ import { supa } from './db'
 import http from 'http'
 import https from 'https'
 import { EventEmitter } from 'events'
+import { processMedia, MediaInfo } from './mediaProcessor'
 
 // Mantém comportamento antigo: pasta local "sessions".
 // Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
@@ -433,11 +434,69 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           const id   = m.key?.id || String(Date.now())
           const from = m.key?.remoteJid || ''
           const fromMe = !!m.key?.fromMe
-          const text = m.message?.conversation
+          
+          // Verificar se tem mídia
+          const hasMedia = !!(
+            (m.message as any)?.imageMessage ||
+            (m.message as any)?.videoMessage ||
+            (m.message as any)?.audioMessage ||
+            (m.message as any)?.documentMessage ||
+            (m.message as any)?.stickerMessage
+          )
+          
+          let text = m.message?.conversation
                     || (m.message as any)?.extendedTextMessage?.text
                     || (m.message as any)?.imageMessage?.caption
                     || (m.message as any)?.videoMessage?.caption
                     || ''
+          
+          let mediaInfo: MediaInfo | null = null
+          
+          // Processar mídia se existir
+          if (hasMedia && !fromMe) { // Processar mídias recebidas
+            try {
+              const buffer = await downloadMediaMessage(m, 'buffer', {})
+              if (buffer) {
+                // Salvar arquivo temporário
+                const tempDir = path.join(process.cwd(), 'data', 'temp')
+                fs.mkdirSync(tempDir, { recursive: true })
+                
+                let extension = '.bin'
+                let mimetype = 'application/octet-stream'
+                
+                if ((m.message as any)?.imageMessage) {
+                  mimetype = (m.message as any).imageMessage.mimetype || 'image/jpeg'
+                  extension = mimetype.includes('png') ? '.png' : 
+                             mimetype.includes('webp') ? '.webp' : '.jpg'
+                } else if ((m.message as any)?.videoMessage) {
+                  mimetype = (m.message as any).videoMessage.mimetype || 'video/mp4'
+                  extension = '.mp4'
+                } else if ((m.message as any)?.audioMessage) {
+                  mimetype = (m.message as any).audioMessage.mimetype || 'audio/ogg'
+                  extension = '.ogg'
+                } else if ((m.message as any)?.documentMessage) {
+                  const doc = (m.message as any).documentMessage
+                  mimetype = doc.mimetype || 'application/octet-stream'
+                  extension = path.extname(doc.fileName || '') || '.bin'
+                }
+                
+                const tempFilePath = path.join(tempDir, `${id}${extension}`)
+                fs.writeFileSync(tempFilePath, buffer)
+                
+                // Processar mídia para gerar thumbnails
+                mediaInfo = await processMedia(tempFilePath, mimetype)
+                
+                // Definir texto para mídia se não tiver caption
+                if (!text) {
+                  text = hasMedia ? `📎 ${mediaInfo.filename}` : ''
+                }
+              }
+            } catch (mediaError) {
+              console.warn('[wa][media][process][warn]', sessionId, mediaError)
+              text = text || '📎 Mídia'
+            }
+          }
+          
           const to   = fromMe ? ( (m.key as any)?.participant || from) : undefined
           // Baileys timestamp vem em segundos (normalmente). Convertemos para ms apenas se parecer razoável.
           let tsRaw = m.messageTimestamp ? Number(m.messageTimestamp) : (Date.now()/1000)
@@ -445,7 +504,26 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
             tsRaw = tsRaw * 1000
           }
           const ts = Math.floor(tsRaw)
-          const msgObj = { id, from, to, text, fromMe, timestamp: ts }
+          
+          const msgObj = { 
+            id, from, to, text, fromMe, timestamp: ts,
+            ...(mediaInfo && {
+              mediaType: mediaInfo.type,
+              mediaPath: mediaInfo.originalPath,
+              thumbnailPath: mediaInfo.thumbnailPath,
+              previewPath: mediaInfo.previewPath,
+              mediaInfo: {
+                type: mediaInfo.type,
+                mimetype: mediaInfo.mimetype,
+                size: mediaInfo.size,
+                width: mediaInfo.width,
+                height: mediaInfo.height,
+                duration: mediaInfo.duration,
+                filename: mediaInfo.filename
+              }
+            })
+          }
+          
           pushMsg(sessionId, msgObj)
 
           // Auto-cadastro do contato no primeiro contato (leve e idempotente)
@@ -644,9 +722,18 @@ export async function sendMedia(sessionId: string, to: string, filePath: string,
     ? to
     : `${to.replace(/\D/g, '')}@s.whatsapp.net`
 
+  // Processar mídia primeiro para gerar thumbnails
+  let mediaInfo: MediaInfo
+  try {
+    const mimetype = options.mimetype || require('mime-types').lookup(filePath) || 'application/octet-stream'
+    mediaInfo = await processMedia(filePath, mimetype)
+  } catch (error) {
+    console.warn('[wa][send][media][process][warn]', error)
+    throw new Error('media_processing_failed')
+  }
+
   const buffer = fs.readFileSync(filePath)
-  // Heurística simples de tipo
-  const mime = options.mimetype || require('mime-types').lookup(filePath) || 'application/octet-stream'
+  const mime = mediaInfo.mimetype
 
   let message: any = { caption: options.caption }
   if (mime.startsWith('image/')) message.image = buffer
@@ -655,7 +742,47 @@ export async function sendMedia(sessionId: string, to: string, filePath: string,
   else if (mime === 'image/webp') message.sticker = buffer
   else message.document = buffer, message.mimetype = mime, message.fileName = path.basename(filePath)
 
-  await s.sock.sendMessage(jid, message)
+  const result = await s.sock.sendMessage(jid, message)
+  
+  // Armazenar informações da mídia enviada
+  if (result) {
+    const msgId = result.key?.id
+    if (msgId) {
+      const msgObj = {
+        id: msgId,
+        from: s.sock.user?.id || sessionId,
+        to: jid,
+        text: options.caption || `📎 ${mediaInfo.filename}`,
+        fromMe: true,
+        timestamp: Date.now(),
+        mediaType: mediaInfo.type,
+        mediaPath: mediaInfo.originalPath,
+        thumbnailPath: mediaInfo.thumbnailPath,
+        previewPath: mediaInfo.previewPath,
+        mediaInfo: {
+          type: mediaInfo.type,
+          mimetype: mediaInfo.mimetype,
+          size: mediaInfo.size,
+          width: mediaInfo.width,
+          height: mediaInfo.height,
+          duration: mediaInfo.duration,
+          filename: mediaInfo.filename
+        }
+      }
+      
+      // Salvar no store local
+      appendMessage(sessionId, msgObj)
+      
+      // Broadcast para clientes conectados
+      try {
+        broadcast(sessionId, 'message', msgObj)
+      } catch (e) {
+        console.warn('[wa][send][broadcast][warn]', e)
+      }
+    }
+  }
+  
+  return result
 }
 
 // Novo: estado resumido da sessão

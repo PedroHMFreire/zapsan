@@ -54,9 +54,7 @@
   <header class="topbar"><div class="topbar-inner">
     <div class="top-left">
       <div class="dropdown dropdown-left" id="hamb-menu">
-        <button type="button" class="icon-btn icon-menu" id="hamb-btn" aria-label="Menu" aria-expanded="false">
-          <span class="btn-text">Menu</span>
-        </button>
+        <button type="button" class="icon-btn icon-menu" id="hamb-btn" aria-label="Menu" aria-expanded="false"></button>
         <div class="dropdown-menu" role="menu" id="hamb-content">
           <button type="button" class="menu-item" id="menu-flow" role="menuitem">Fluxo IA</button>
           <button type="button" class="menu-item" id="menu-schedule" role="menuitem">Agendar envios</button>
@@ -64,17 +62,11 @@
         </div>
       </div>
     </div>
-    <div class="brand icon-whatsapp">
-      <span>ZapSan</span>
-    </div>
+    <div class="brand icon-whatsapp">ZapSan</div>
     <div class="top-right">
       <button type="button" class="icon-btn" id="theme-toggle" aria-label="Alternar tema" title="Tema"></button>
-      <div class="badge icon-status" id="svc-badge">
-        <span>Carregando…</span>
-      </div>
-      <button type="button" class="m-btn icon-user" id="profile-btn" aria-haspopup="dialog" title="Perfil">
-        <span class="btn-text">Perfil</span>
-      </button>
+      <div class="badge icon-status" id="svc-badge">Carregando…</div>
+      <button type="button" class="m-btn icon-user" id="profile-btn" aria-haspopup="dialog" title="Perfil"></button>
     </div>
   </div></header>
 
@@ -740,7 +732,7 @@
     
     messagesEl.innerHTML='';
     const msgs = messagesByJid.get(jid)||[];
-    msgs.sort((a,b)=>a.timestamp-b.timestamp).forEach(m=>pushMsg(m.fromMe?'out':'in', m.text, m.id));
+    msgs.sort((a,b)=>a.timestamp-b.timestamp).forEach(m=>pushMsg(m.fromMe?'out':'in', m.text, m.id, m.mediaInfo));
     if(window.matchMedia('(max-width:1023px)').matches){ app.dataset.view='chat'; backBtn.style.display='inline-block'; }
     document.querySelectorAll('.chat-item').forEach(el=>el.classList.remove('is-active'));
     const displayName = formatContactName(jid);
@@ -751,16 +743,31 @@
     renderChatList(); // atualiza contadores
   }
 
-  function pushMsg(dir,text,id){
+  function pushMsg(dir,text,id,mediaInfo){
     const temp = !id;
     id = id || (Date.now().toString(36)+'-'+(msgSeq++).toString(36));
     const el=document.createElement('div');
     el.className='msg '+(dir==='out'?'out':'in');
     el.setAttribute('data-id', id);
     
-    // Aplicar linkify ao texto e usar innerHTML para renderizar links
-    const linkedText = linkify(escapeHtml(text));
-    el.innerHTML = linkedText;
+    // Verificar se tem mídia
+    if(mediaInfo && mediaInfo.type !== 'document') {
+      // Criar preview de mídia
+      const mediaEl = createMediaPreview(mediaInfo, id);
+      el.appendChild(mediaEl);
+      
+      // Adicionar caption se houver texto
+      if(text && text !== `📎 ${mediaInfo.filename}`) {
+        const captionEl = document.createElement('div');
+        captionEl.className = 'media-caption';
+        captionEl.innerHTML = linkify(escapeHtml(text));
+        el.appendChild(captionEl);
+      }
+    } else {
+      // Mensagem de texto normal ou documento
+      const linkedText = linkify(escapeHtml(text));
+      el.innerHTML = linkedText;
+    }
     
     if(temp) el.classList.add('pending');
     // etiqueta existente via API (fetch preguiçoso)
@@ -776,6 +783,131 @@
     });
     messagesEl.appendChild(el);
     scrollBottom();
+  }
+  
+  // Função para criar preview de mídia
+  function createMediaPreview(mediaInfo, messageId) {
+    const container = document.createElement('div');
+    container.className = `media-preview media-${mediaInfo.type}`;
+    
+    if(mediaInfo.type === 'image') {
+      const img = document.createElement('img');
+      img.className = 'media-thumbnail lazy';
+      img.src = '/media/thumbnail/' + getMediaHash(mediaInfo);
+      img.alt = mediaInfo.filename;
+      img.style.cssText = 'max-width: 250px; max-height: 200px; border-radius: 8px; cursor: pointer;';
+      
+      // Click para abrir modal de preview
+      img.onclick = () => openMediaModal(mediaInfo, messageId);
+      
+      container.appendChild(img);
+    } else if(mediaInfo.type === 'video') {
+      const videoContainer = document.createElement('div');
+      videoContainer.className = 'video-preview';
+      videoContainer.style.cssText = 'position: relative; max-width: 250px; max-height: 200px; border-radius: 8px; cursor: pointer; background: #000;';
+      
+      const thumbnail = document.createElement('img');
+      thumbnail.src = '/media/thumbnail/' + getMediaHash(mediaInfo);
+      thumbnail.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 8px;';
+      
+      const playBtn = document.createElement('div');
+      playBtn.innerHTML = '▶️';
+      playBtn.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; color: white; background: rgba(0,0,0,0.7); width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center;';
+      
+      videoContainer.appendChild(thumbnail);
+      videoContainer.appendChild(playBtn);
+      videoContainer.onclick = () => openMediaModal(mediaInfo, messageId);
+      
+      container.appendChild(videoContainer);
+    } else if(mediaInfo.type === 'audio') {
+      const audioEl = document.createElement('div');
+      audioEl.className = 'audio-preview';
+      audioEl.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255,255,255,0.1); border-radius: 8px; max-width: 250px;';
+      
+      const iconEl = document.createElement('div');
+      iconEl.innerHTML = '🎵';
+      iconEl.style.fontSize = '24px';
+      
+      const infoEl = document.createElement('div');
+      infoEl.innerHTML = `<div style="font-weight: 500;">${mediaInfo.filename}</div><div style="font-size: 0.8em; opacity: 0.7;">${formatFileSize(mediaInfo.size)}</div>`;
+      
+      audioEl.appendChild(iconEl);
+      audioEl.appendChild(infoEl);
+      audioEl.onclick = () => openMediaModal(mediaInfo, messageId);
+      
+      container.appendChild(audioEl);
+    }
+    
+    return container;
+  }
+  
+  // Modal para visualização de mídia
+  function openMediaModal(mediaInfo, messageId) {
+    const modal = document.createElement('div');
+    modal.className = 'media-modal';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 20px;';
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '✖';
+    closeBtn.style.cssText = 'position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.2); border: none; color: white; font-size: 24px; width: 40px; height: 40px; border-radius: 50%; cursor: pointer;';
+    closeBtn.onclick = () => modal.remove();
+    
+    let content;
+    if(mediaInfo.type === 'image') {
+      content = document.createElement('img');
+      content.src = '/media/preview/' + getMediaHash(mediaInfo);
+      content.style.cssText = 'max-width: 90vw; max-height: 90vh; object-fit: contain;';
+    } else if(mediaInfo.type === 'video') {
+      content = document.createElement('video');
+      content.src = `/media/original/${currentChat?.sessionId || 'default'}/${messageId}`;
+      content.controls = true;
+      content.style.cssText = 'max-width: 90vw; max-height: 90vh;';
+    } else if(mediaInfo.type === 'audio') {
+      content = document.createElement('div');
+      content.style.cssText = 'text-align: center; color: white;';
+      
+      const audioEl = document.createElement('audio');
+      audioEl.src = `/media/original/${currentChat?.sessionId || 'default'}/${messageId}`;
+      audioEl.controls = true;
+      audioEl.style.width = '300px';
+      
+      const infoEl = document.createElement('div');
+      infoEl.innerHTML = `<h3>${mediaInfo.filename}</h3><p>${formatFileSize(mediaInfo.size)}</p>`;
+      
+      content.appendChild(infoEl);
+      content.appendChild(audioEl);
+    }
+    
+    modal.appendChild(closeBtn);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    
+    // Fechar com ESC ou clique fora
+    modal.addEventListener('click', (e) => {
+      if(e.target === modal) modal.remove();
+    });
+    document.addEventListener('keydown', function escHandler(e) {
+      if(e.key === 'Escape') {
+        modal.remove();
+        document.removeEventListener('keydown', escHandler);
+      }
+    });
+  }
+  
+  // Utilitários
+  function getMediaHash(mediaInfo) {
+    // Gerar hash baseado no filename e size para identificar mídia
+    if(!mediaInfo || !mediaInfo.filename) return 'unknown';
+    const hashInput = mediaInfo.filename + (mediaInfo.size || 0);
+    return hashInput.replace(/[^a-zA-Z0-9]/g, '').substring(0, 16) + '.webp';
+  }
+  
+  function formatFileSize(bytes) {
+    if(bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
   function scrollBottom(){ messagesEl.scrollTop=messagesEl.scrollHeight; }
 
@@ -1286,7 +1418,13 @@
       if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
       // evitar duplicados
       if(!messagesByJid.get(jid).some(x=>x.id===m.id)){
-        messagesByJid.get(jid).push({ id:m.id, text:m.text||'', fromMe:!!m.fromMe, timestamp:m.timestamp||Date.now() });
+        messagesByJid.get(jid).push({ 
+          id:m.id, 
+          text:m.text||'', 
+          fromMe:!!m.fromMe, 
+          timestamp:m.timestamp||Date.now(),
+          mediaInfo: m.mediaInfo || null
+        });
       }
       // Reconciliação otimista: se mensagem fromMe e possuímos .pending com mesmo texto recente
       if(m.fromMe && currentChat && currentChat.id===jid){
@@ -1311,7 +1449,7 @@
       if(currentChat && currentChat.id===jid){
         // só adicionar se não reconciliado (sem elemento com data-id)
         if(!messagesEl.querySelector(`[data-id="${m.id}"]`)){
-          pushMsg(m.fromMe?'out':'in', m.text||'', m.id);
+          pushMsg(m.fromMe?'out':'in', m.text||'', m.id, m.mediaInfo);
         }
       }
       renderChatList();

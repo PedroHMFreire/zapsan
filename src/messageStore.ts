@@ -11,6 +11,17 @@ export interface StoredMessage {
   pushName?: string
   mediaType?: string
   mediaPath?: string
+  thumbnailPath?: string
+  previewPath?: string
+  mediaInfo?: {
+    type: 'image' | 'video' | 'audio' | 'document'
+    mimetype: string
+    size: number
+    width?: number
+    height?: number
+    duration?: number
+    filename: string
+  }
   status?: string // ack status etc
 }
 

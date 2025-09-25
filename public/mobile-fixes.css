@@ -1,10 +1,12 @@
 /* ===== MOBILE VISUAL FIXES - ZapSan ===== */
 
-/* 🔧 FIX: Prevent horizontal scrolling */
+/* 🔧 FIX: Prevent horizontal scrolling and fix viewport height */
 html, body {
   max-width: 100vw;
   overflow-x: hidden;
   box-sizing: border-box;
+  height: 100vh;
+  overflow-y: hidden; /* Remove scroll da página principal */
 }
 
 *, *::before, *::after {
@@ -40,7 +42,7 @@ html, body {
   max-width: 100%;
 }
 
-/* 🔧 FIX: Brand section - centered and responsive */
+/* 🔧 FIX: Brand section - centered and responsive (icon + text) */
 .brand {
   display: flex;
   align-items: center;
@@ -52,6 +54,12 @@ html, body {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+}
+
+/* Brand com ícone - ícone à esquerda do texto */
+.brand.icon-whatsapp {
+  padding-left: 28px; /* espaço para o ícone */
+  position: relative;
 }
 
 /* 🔧 FIX: Top sections positioning */
@@ -73,35 +81,66 @@ html, body {
 }
 
 /* 🎨 ENHANCED: Sophisticated icons (SVG-based, no color) */
-.icon-whatsapp::before { content: ''; display: inline-block; width: 20px; height: 20px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+.icon-whatsapp::before { 
+  content: ''; 
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px; 
+  height: 20px; 
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z'/%3E%3C/svg%3E") no-repeat center; 
+  background-size: contain; 
+}
 
-.icon-menu::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='3' y1='6' x2='21' y2='6'/%3E%3Cline x1='3' y1='12' x2='21' y2='12'/%3E%3Cline x1='3' y1='18' x2='21' y2='18'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+/* Botões apenas com ícones */
+.icon-menu::before,
+.icon-user::before,
+.icon-status::before { 
+  content: ''; 
+  display: inline-block; 
+  width: 18px; 
+  height: 18px; 
+  background-size: contain; 
+  background-repeat: no-repeat;
+  background-position: center;
+}
 
+.icon-menu::before { 
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='3' y1='6' x2='21' y2='6'/%3E%3Cline x1='3' y1='12' x2='21' y2='12'/%3E%3Cline x1='3' y1='18' x2='21' y2='18'/%3E%3C/svg%3E"); 
+}
+
+.icon-user::before { 
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E"); 
+}
+
+.icon-status::before { 
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M8 12l2 2 4-4'/%3E%3C/svg%3E"); 
+}
+
+/* Manter outros ícones */
 .icon-settings::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
-
-.icon-user::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
-
-.icon-status::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M8 12l2 2 4-4'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
 
 .icon-close::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
 
 .icon-send::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='22' y1='2' x2='11' y2='13'/%3E%3Cpolygon points='22,2 15,22 11,13 2,9'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
 
-/* 🔧 FIX: Button improvements with sophisticated styling */
+/* 🔧 FIX: Button improvements with sophisticated styling - icon-only */
 .m-btn, .icon-btn {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 10px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 14px;
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   min-height: 40px;
+  min-width: 40px;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -185,23 +224,39 @@ html, body {
   }
 }
 
-/* 🔧 FIX: App layout on mobile - prevent overflow */
+/* 🔧 FIX: App layout on mobile - prevent overflow and ensure proper scroll */
 .app {
   max-width: 100vw;
   width: 100%;
-  min-height: 100vh;
-  overflow-x: hidden;
+  height: 100vh;
+  overflow: hidden;
 }
 
 @media (max-width: 1023px) {
   .app {
     grid-template-columns: 1fr;
     max-width: 100vw;
+    height: 100vh;
+    overflow: hidden;
   }
   
   .sidebar, .chat {
     max-width: 100vw;
     min-width: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+  
+  /* Garantir que o chat tenha altura correta no mobile */
+  .chat {
+    height: calc(100vh - 60px); /* Desconta altura do topbar */
+  }
+  
+  /* Ajustar altura das mensagens no mobile */
+  .c-messages {
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 }
 

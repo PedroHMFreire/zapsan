@@ -57,6 +57,7 @@ exports.getSessionStatus = getSessionStatus;
 exports.getMessages = getMessages;
 exports.onMessageStream = onMessageStream;
 const baileys_1 = __importStar(require("@whiskeysockets/baileys"));
+const baileys_2 = require("@whiskeysockets/baileys");
 const pino_1 = __importDefault(require("pino"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -66,6 +67,7 @@ const searchIndex_1 = require("./searchIndex");
 const realtime_1 = require("./realtime");
 const db_1 = require("./db");
 const events_1 = require("events");
+const mediaProcessor_1 = require("./mediaProcessor");
 // Mantém comportamento antigo: pasta local "sessions".
 // Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
 const SESS_DIR = process.env.SESS_DIR || path_1.default.resolve(process.cwd(), 'sessions');
@@ -469,11 +471,61 @@ async function createOrLoadSession(sessionId) {
                     const id = m.key?.id || String(Date.now());
                     const from = m.key?.remoteJid || '';
                     const fromMe = !!m.key?.fromMe;
-                    const text = m.message?.conversation
+                    // Verificar se tem mídia
+                    const hasMedia = !!(m.message?.imageMessage ||
+                        m.message?.videoMessage ||
+                        m.message?.audioMessage ||
+                        m.message?.documentMessage ||
+                        m.message?.stickerMessage);
+                    let text = m.message?.conversation
                         || m.message?.extendedTextMessage?.text
                         || m.message?.imageMessage?.caption
                         || m.message?.videoMessage?.caption
                         || '';
+                    let mediaInfo = null;
+                    // Processar mídia se existir
+                    if (hasMedia && !fromMe) { // Processar mídias recebidas
+                        try {
+                            const buffer = await (0, baileys_2.downloadMediaMessage)(m, 'buffer', {});
+                            if (buffer) {
+                                // Salvar arquivo temporário
+                                const tempDir = path_1.default.join(process.cwd(), 'data', 'temp');
+                                fs_1.default.mkdirSync(tempDir, { recursive: true });
+                                let extension = '.bin';
+                                let mimetype = 'application/octet-stream';
+                                if (m.message?.imageMessage) {
+                                    mimetype = m.message.imageMessage.mimetype || 'image/jpeg';
+                                    extension = mimetype.includes('png') ? '.png' :
+                                        mimetype.includes('webp') ? '.webp' : '.jpg';
+                                }
+                                else if (m.message?.videoMessage) {
+                                    mimetype = m.message.videoMessage.mimetype || 'video/mp4';
+                                    extension = '.mp4';
+                                }
+                                else if (m.message?.audioMessage) {
+                                    mimetype = m.message.audioMessage.mimetype || 'audio/ogg';
+                                    extension = '.ogg';
+                                }
+                                else if (m.message?.documentMessage) {
+                                    const doc = m.message.documentMessage;
+                                    mimetype = doc.mimetype || 'application/octet-stream';
+                                    extension = path_1.default.extname(doc.fileName || '') || '.bin';
+                                }
+                                const tempFilePath = path_1.default.join(tempDir, `${id}${extension}`);
+                                fs_1.default.writeFileSync(tempFilePath, buffer);
+                                // Processar mídia para gerar thumbnails
+                                mediaInfo = await (0, mediaProcessor_1.processMedia)(tempFilePath, mimetype);
+                                // Definir texto para mídia se não tiver caption
+                                if (!text) {
+                                    text = hasMedia ? `📎 ${mediaInfo.filename}` : '';
+                                }
+                            }
+                        }
+                        catch (mediaError) {
+                            console.warn('[wa][media][process][warn]', sessionId, mediaError);
+                            text = text || '📎 Mídia';
+                        }
+                    }
                     const to = fromMe ? (m.key?.participant || from) : undefined;
                     // Baileys timestamp vem em segundos (normalmente). Convertemos para ms apenas se parecer razoável.
                     let tsRaw = m.messageTimestamp ? Number(m.messageTimestamp) : (Date.now() / 1000);
@@ -481,7 +533,24 @@ async function createOrLoadSession(sessionId) {
                         tsRaw = tsRaw * 1000;
                     }
                     const ts = Math.floor(tsRaw);
-                    const msgObj = { id, from, to, text, fromMe, timestamp: ts };
+                    const msgObj = {
+                        id, from, to, text, fromMe, timestamp: ts,
+                        ...(mediaInfo && {
+                            mediaType: mediaInfo.type,
+                            mediaPath: mediaInfo.originalPath,
+                            thumbnailPath: mediaInfo.thumbnailPath,
+                            previewPath: mediaInfo.previewPath,
+                            mediaInfo: {
+                                type: mediaInfo.type,
+                                mimetype: mediaInfo.mimetype,
+                                size: mediaInfo.size,
+                                width: mediaInfo.width,
+                                height: mediaInfo.height,
+                                duration: mediaInfo.duration,
+                                filename: mediaInfo.filename
+                            }
+                        })
+                    };
                     pushMsg(sessionId, msgObj);
                     // Auto-cadastro do contato no primeiro contato (leve e idempotente)
                     try {
@@ -702,9 +771,18 @@ async function sendMedia(sessionId, to, filePath, options) {
     const jid = to.includes('@s.whatsapp.net') || to.includes('@g.us')
         ? to
         : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
+    // Processar mídia primeiro para gerar thumbnails
+    let mediaInfo;
+    try {
+        const mimetype = options.mimetype || require('mime-types').lookup(filePath) || 'application/octet-stream';
+        mediaInfo = await (0, mediaProcessor_1.processMedia)(filePath, mimetype);
+    }
+    catch (error) {
+        console.warn('[wa][send][media][process][warn]', error);
+        throw new Error('media_processing_failed');
+    }
     const buffer = fs_1.default.readFileSync(filePath);
-    // Heurística simples de tipo
-    const mime = options.mimetype || require('mime-types').lookup(filePath) || 'application/octet-stream';
+    const mime = mediaInfo.mimetype;
     let message = { caption: options.caption };
     if (mime.startsWith('image/'))
         message.image = buffer;
@@ -716,7 +794,44 @@ async function sendMedia(sessionId, to, filePath, options) {
         message.sticker = buffer;
     else
         message.document = buffer, message.mimetype = mime, message.fileName = path_1.default.basename(filePath);
-    await s.sock.sendMessage(jid, message);
+    const result = await s.sock.sendMessage(jid, message);
+    // Armazenar informações da mídia enviada
+    if (result) {
+        const msgId = result.key?.id;
+        if (msgId) {
+            const msgObj = {
+                id: msgId,
+                from: s.sock.user?.id || sessionId,
+                to: jid,
+                text: options.caption || `📎 ${mediaInfo.filename}`,
+                fromMe: true,
+                timestamp: Date.now(),
+                mediaType: mediaInfo.type,
+                mediaPath: mediaInfo.originalPath,
+                thumbnailPath: mediaInfo.thumbnailPath,
+                previewPath: mediaInfo.previewPath,
+                mediaInfo: {
+                    type: mediaInfo.type,
+                    mimetype: mediaInfo.mimetype,
+                    size: mediaInfo.size,
+                    width: mediaInfo.width,
+                    height: mediaInfo.height,
+                    duration: mediaInfo.duration,
+                    filename: mediaInfo.filename
+                }
+            };
+            // Salvar no store local
+            (0, messageStore_1.appendMessage)(sessionId, msgObj);
+            // Broadcast para clientes conectados
+            try {
+                (0, realtime_1.broadcast)(sessionId, 'message', msgObj);
+            }
+            catch (e) {
+                console.warn('[wa][send][broadcast][warn]', e);
+            }
+        }
+    }
+    return result;
 }
 // Novo: estado resumido da sessão
 function getStatus(sessionId) {

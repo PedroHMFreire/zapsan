@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 // Update the import to match the actual exported member names from './wa'
 import { createOrLoadSession, getQR, sendText, getStatus, getDebug, getMessages as getMessagesNew, sendMedia, getAllSessionMeta, cleanLogout, createIdleSession, nukeAllSessions, getSessionStatus, onMessageStream, allowManualStart, getProfilePicture } from './wa'
+import { serveMedia } from './mediaProcessor'
 import { authenticate, upsertUserIfMissing, findUser, createUser } from './users'
 import { registerUser, loginUser, fetchUserProfile } from './supaUsers'
 import multer from 'multer'
@@ -677,6 +678,49 @@ r.post('/messages/media', upload.single('file'), async (req: Request, res: Respo
   } catch (err: any) {
     const code = err?.message === 'session_not_found' ? 404 : 500
     return res.status(code).json({ error: err?.message || 'internal_error' })
+  } finally {
+    // Limpar arquivo temporário
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path) } catch {}
+    }
+  }
+})
+
+// Servir thumbnails de mídia
+r.get('/media/thumbnail/:hash', (req: Request, res: Response) => {
+  const hash = req.params.hash
+  const thumbnailPath = path.join(process.cwd(), 'data', 'media', 'thumbnails', hash)
+  serveMedia(thumbnailPath, res)
+})
+
+// Servir previews de mídia
+r.get('/media/preview/:hash', (req: Request, res: Response) => {
+  const hash = req.params.hash
+  const previewPath = path.join(process.cwd(), 'data', 'media', 'previews', hash)
+  serveMedia(previewPath, res)
+})
+
+// Servir mídia original
+r.get('/media/original/:sessionId/:messageId', async (req: Request, res: Response) => {
+  try {
+    const { sessionId, messageId } = req.params
+    
+    // Verificar autenticação (implementar se necessário)
+    // const uid = await verifyUser(req)
+    // if (!uid) return res.status(401).json({ error: 'unauthenticated' })
+    
+    // Buscar mensagem no store para obter caminho da mídia
+    const messages = getMessagesNew(sessionId, 1000)
+    const message = messages.find(m => m.id === messageId)
+    
+    if (!message || !(message as any).mediaPath) {
+      return res.status(404).json({ error: 'media_not_found' })
+    }
+    
+    serveMedia((message as any).mediaPath, res)
+  } catch (err: any) {
+    console.warn('[media][original][serve][error]', err?.message)
+    res.status(500).json({ error: 'serve_error' })
   }
 })
 
