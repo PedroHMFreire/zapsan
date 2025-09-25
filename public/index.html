@@ -11,6 +11,7 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/mobile-enhancements.css" />
+  <link rel="stylesheet" href="/mobile-fixes.css" />
   <script>(function(){
     try {
       const onLogin = location.pathname.endsWith('/login.html');
@@ -53,7 +54,9 @@
   <header class="topbar"><div class="topbar-inner">
     <div class="top-left">
       <div class="dropdown dropdown-left" id="hamb-menu">
-        <button type="button" class="icon-btn" id="hamb-btn" aria-label="Menu" aria-expanded="false">☰</button>
+        <button type="button" class="icon-btn icon-menu" id="hamb-btn" aria-label="Menu" aria-expanded="false">
+          <span class="btn-text">Menu</span>
+        </button>
         <div class="dropdown-menu" role="menu" id="hamb-content">
           <button type="button" class="menu-item" id="menu-flow" role="menuitem">Fluxo IA</button>
           <button type="button" class="menu-item" id="menu-schedule" role="menuitem">Agendar envios</button>
@@ -61,11 +64,17 @@
         </div>
       </div>
     </div>
-    <div class="brand">ZapSan</div>
+    <div class="brand icon-whatsapp">
+      <span>ZapSan</span>
+    </div>
     <div class="top-right">
       <button type="button" class="icon-btn" id="theme-toggle" aria-label="Alternar tema" title="Tema"></button>
-      <div class="badge" id="svc-badge">Carregando…</div>
-      <button type="button" class="m-btn" id="profile-btn" aria-haspopup="dialog" title="Perfil">👤</button>
+      <div class="badge icon-status" id="svc-badge">
+        <span>Carregando…</span>
+      </div>
+      <button type="button" class="m-btn icon-user" id="profile-btn" aria-haspopup="dialog" title="Perfil">
+        <span class="btn-text">Perfil</span>
+      </button>
     </div>
   </div></header>
 
@@ -73,7 +82,9 @@
     <aside class="sidebar">
       <div class="s-header">
         <div class="brand" style="font-size:15px">Conversas</div>
-  <div class="actions"><button type="button" class="icon-btn" id="new-chat" aria-label="Nova conversa">＋</button></div>
+  <div class="actions"><button type="button" class="icon-btn icon-user" id="new-chat" aria-label="Nova conversa">
+    <span class="btn-text">+</span>
+  </button></div>
       </div>
       <div class="s-search"><input class="input" id="search" placeholder="Pesquisar conversas…"></div>
       <div class="s-filters">

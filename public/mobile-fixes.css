@@ -1,0 +1,338 @@
+/* ===== MOBILE VISUAL FIXES - ZapSan ===== */
+
+/* 🔧 FIX: Prevent horizontal scrolling */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+*, *::before, *::after {
+  box-sizing: inherit;
+}
+
+/* 🔧 FIX: Container max-width issues */
+.container, .app, .topbar-inner {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* 🔧 FIX: Topbar alignment and responsive layout */
+.topbar {
+  width: 100%;
+  max-width: 100vw;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--wa-green-dark);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  gap: 12px;
+  flex-wrap: nowrap;
+  max-width: 100%;
+}
+
+/* 🔧 FIX: Brand section - centered and responsive */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 18px;
+  color: white;
+  flex-shrink: 0;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* 🔧 FIX: Top sections positioning */
+.top-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  z-index: 1;
+  margin-left: auto;
+}
+
+/* 🎨 ENHANCED: Sophisticated icons (SVG-based, no color) */
+.icon-whatsapp::before { content: ''; display: inline-block; width: 20px; height: 20px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+
+.icon-menu::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='3' y1='6' x2='21' y2='6'/%3E%3Cline x1='3' y1='12' x2='21' y2='12'/%3E%3Cline x1='3' y1='18' x2='21' y2='18'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+
+.icon-settings::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+
+.icon-user::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+
+.icon-status::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M8 12l2 2 4-4'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+
+.icon-close::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+
+.icon-send::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='22' y1='2' x2='11' y2='13'/%3E%3Cpolygon points='22,2 15,22 11,13 2,9'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
+
+/* 🔧 FIX: Button improvements with sophisticated styling */
+.m-btn, .icon-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.m-btn:hover, .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.m-btn:active, .icon-btn:active {
+  transform: translateY(0);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 🔧 FIX: Badge improvements */
+.badge {
+  background: rgba(37, 211, 102, 0.15);
+  border: 1px solid rgba(37, 211, 102, 0.3);
+  color: #69f0ae;
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* 🔧 FIX: Mobile responsive breakpoints */
+@media (max-width: 768px) {
+  .topbar-inner {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  
+  .brand {
+    font-size: 16px;
+  }
+  
+  .m-btn, .icon-btn {
+    padding: 8px 10px;
+    font-size: 13px;
+    min-height: 36px;
+  }
+  
+  .badge {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar-inner {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  
+  .brand {
+    font-size: 14px;
+    gap: 6px;
+  }
+  
+  .m-btn, .icon-btn {
+    padding: 6px 8px;
+    font-size: 12px;
+    min-height: 32px;
+  }
+  
+  /* Hide text in buttons on very small screens, keep only icons */
+  .m-btn .btn-text {
+    display: none;
+  }
+  
+  .badge {
+    padding: 3px 6px;
+    font-size: 10px;
+  }
+}
+
+/* 🔧 FIX: App layout on mobile - prevent overflow */
+.app {
+  max-width: 100vw;
+  width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+@media (max-width: 1023px) {
+  .app {
+    grid-template-columns: 1fr;
+    max-width: 100vw;
+  }
+  
+  .sidebar, .chat {
+    max-width: 100vw;
+    min-width: 0;
+  }
+}
+
+/* 🔧 FIX: Chat layout improvements */
+.chat-item {
+  padding: 12px 16px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.chat-item .meta {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-item .name, .chat-item .last {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* 🔧 FIX: Input fields responsive */
+.input, .c-composer textarea.input {
+  max-width: 100%;
+  box-sizing: border-box;
+  font-size: 16px; /* Prevent zoom on iOS */
+}
+
+/* 🔧 FIX: Modal responsive improvements */
+@media (max-width: 520px) {
+  .modal-card, .modal-content {
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+    margin: 10px;
+  }
+}
+
+/* 🔧 FIX: Drawer responsive improvements */
+.drawer-panel {
+  width: min(400px, 100vw - 20px);
+  max-width: calc(100vw - 20px);
+}
+
+/* 🎨 ENHANCED: Loading states with sophisticated animations */
+@keyframes pulse-sophisticated {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.02); }
+}
+
+.loading-state {
+  animation: pulse-sophisticated 2s ease-in-out infinite;
+}
+
+/* 🎨 ENHANCED: Focus states for accessibility */
+.m-btn:focus-visible, .icon-btn:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--wa-accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(37, 211, 102, 0.2);
+}
+
+/* 🔧 FIX: Prevent text selection on UI elements */
+.topbar, .topbar-inner, .brand, .m-btn, .icon-btn, .badge {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* 🔧 FIX: Safe area insets for notched devices */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .topbar {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  .c-composer {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 🎨 ENHANCED: Smooth transitions for theme changes */
+html, body, .topbar, .m-btn, .icon-btn, .badge, .app, .sidebar, .chat {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* 🔧 FIX: High DPI display optimizations */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .icon-whatsapp::before,
+  .icon-menu::before,
+  .icon-settings::before,
+  .icon-user::before,
+  .icon-status::before,
+  .icon-close::before,
+  .icon-send::before {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+}
+
+/* 🎨 ENHANCED: Micro-interactions */
+.topbar {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.3s ease;
+}
+
+.topbar:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* 🔧 FIX: Performance optimizations */
+.topbar, .topbar-inner, .app, .brand {
+  will-change: transform;
+  contain: layout;
+}
+
+/* 🎨 ENHANCED: Dark/Light theme icon adjustments */
+[data-theme='light'] .m-btn,
+[data-theme='light'] .icon-btn {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text);
+}
+
+[data-theme='light'] .m-btn:hover,
+[data-theme='light'] .icon-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme='light'] .badge {
+  background: rgba(37, 211, 102, 0.1);
+  border-color: rgba(37, 211, 102, 0.2);
+  color: var(--wa-green-dark);
+}
