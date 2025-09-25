@@ -3,17 +3,16 @@
  * Implementa cache offline e background sync
  */
 
-const CACHE_VERSION = 'zapsan-v1.2.0'
+const CACHE_VERSION = 'zapsan-v1.2.1-redirect-fix'
 const STATIC_CACHE = `${CACHE_VERSION}-static`
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`
 const API_CACHE = `${CACHE_VERSION}-api`
 
-// Recursos para cache imediato
+// Recursos para cache imediato (removido login.html para permitir redirects)
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/chat.html',
-  '/login.html',
   '/styles.css',
   '/mobile-enhancements.css',
   '/login.js',
@@ -83,6 +82,12 @@ self.addEventListener('fetch', event => {
   
   // Ignorar requests externos e chrome-extension
   if (url.origin !== self.location.origin) return
+  
+  // CORREÇÃO: Ignorar rotas de autenticação para permitir redirects
+  const authRoutes = ['/login.html', '/auth/', '/logout']
+  if (authRoutes.some(route => url.pathname.includes(route))) {
+    return // Deixa o browser lidar naturalmente com redirects
+  }
   
   // Estratégia baseada no tipo de recurso
   if (request.method === 'GET') {
@@ -156,7 +161,11 @@ async function cacheFirst(request, cacheName, ttl = null) {
 // Network First Strategy
 async function networkFirst(request, cacheName, ttl = null) {
   try {
-    const response = await fetch(request)
+    // CORREÇÃO: Configurar fetch para seguir redirects automaticamente
+    const response = await fetch(request, {
+      redirect: 'follow',
+      credentials: 'same-origin'
+    })
     
     if (response.ok) {
       // Clonar response para cache
