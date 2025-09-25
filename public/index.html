@@ -707,6 +707,22 @@
 
   function escapeHtml(t){ return t.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]||c)) }
 
+  // === LINKIFY FUNCTION ===
+  function linkify(text) {
+    // Regex para detectar URLs (http, https, www, e domínios simples)
+    const urlRegex = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:\/[^\s<>"']*)?)/gi;
+    
+    return text.replace(urlRegex, (url) => {
+      let href = url;
+      // Adicionar protocolo se necessário
+      if (!url.match(/^https?:\/\//)) {
+        href = 'https://' + url;
+      }
+      
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="msg-link">${url}</a>`;
+    });
+  }
+
   async function selectChat(jid){
     const chat = chatsMap.get(jid);
     if(!chat) return;
@@ -741,7 +757,11 @@
     const el=document.createElement('div');
     el.className='msg '+(dir==='out'?'out':'in');
     el.setAttribute('data-id', id);
-    el.textContent=text;
+    
+    // Aplicar linkify ao texto e usar innerHTML para renderizar links
+    const linkedText = linkify(escapeHtml(text));
+    el.innerHTML = linkedText;
+    
     if(temp) el.classList.add('pending');
     // etiqueta existente via API (fetch preguiçoso)
     fetch('/tags').then(r=>r.ok?r.json():{tags:{}}).then(j=>{

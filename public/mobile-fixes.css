@@ -336,3 +336,73 @@ html, body, .topbar, .m-btn, .icon-btn, .badge, .app, .sidebar, .chat {
   border-color: rgba(37, 211, 102, 0.2);
   color: var(--wa-green-dark);
 }
+
+/* 🔗 ENHANCED: Clickable links in messages */
+.msg-link {
+  color: var(--wa-accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  word-break: break-all;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.msg-link:hover {
+  color: #69f0ae;
+  text-decoration-style: solid;
+  text-shadow: 0 0 8px rgba(105, 240, 174, 0.3);
+  transform: scale(1.02);
+}
+
+.msg-link:active {
+  transform: scale(0.98);
+}
+
+/* Links in outgoing messages */
+.msg.out .msg-link {
+  color: #b2dfdb;
+}
+
+.msg.out .msg-link:hover {
+  color: #e0f7fa;
+}
+
+/* Links in incoming messages */
+.msg.in .msg-link {
+  color: var(--wa-accent);
+}
+
+/* Light theme link styles */
+[data-theme='light'] .msg-link {
+  color: var(--wa-green-dark);
+}
+
+[data-theme='light'] .msg.out .msg-link {
+  color: #004d40;
+}
+
+[data-theme='light'] .msg.in .msg-link {
+  color: var(--wa-green-dark);
+}
+
+[data-theme='light'] .msg-link:hover {
+  color: #00695c;
+}
+
+/* Link icon indicator */
+.msg-link::before {
+  content: '🔗';
+  font-size: 12px;
+  margin-right: 4px;
+  opacity: 0.7;
+}
+
+/* Mobile optimizations for links */
+@media (max-width: 768px) {
+  .msg-link {
+    word-break: break-word;
+    hyphens: auto;
+  }
+}
