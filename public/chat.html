@@ -11,7 +11,14 @@
   <script>(function(){try{const a=localStorage.getItem('auth')==='ok';const onL=location.pathname.endsWith('/login.html');if(!a&&!onL){location.replace('/login.html');}if(a&&onL){location.replace('/');}}catch(e){}})();</script>
 </head>
 <body>
-  <header><h1>Chat do Bot</h1></header>
+  <header>
+    <h1>Chat do Bot</h1>
+    <div class="ai-control">
+      <button id="aiToggle" class="btn ai-btn">
+        <span class="ai-status">🤖 IA: <span id="aiStatusText">Carregando...</span></span>
+      </button>
+    </div>
+  </header>
   <div class="container">
     <div class="card chat">
       <div class="messages" id="messages"></div>
@@ -27,10 +34,15 @@
   </div>
   <script>
     let session_id = null;
+    let aiEnabled = true; // Estado local da IA
+    
     const list = document.getElementById('messages');
     const to = document.getElementById('to');
     const text = document.getElementById('text');
     const sendBtn = document.getElementById('send');
+    const aiToggleBtn = document.getElementById('aiToggle');
+    const aiStatusText = document.getElementById('aiStatusText');
+    
     async function resolveSession(){
       try {
         session_id = localStorage.getItem('sessionId') || null;
@@ -39,15 +51,86 @@
           const r = await fetch('/me/session');
           if(r.ok){ const j = await r.json(); session_id = j.sessionId; localStorage.setItem('sessionId', session_id); }
         }
-        if(session_id){ startStream(); }
+        if(session_id){ 
+          startStream(); 
+          loadAIStatus(); // Carregar status da IA
+        }
       } catch{}
     }
+    
+    // 🤖 Controle da IA
+    async function loadAIStatus() {
+      try {
+        const r = await fetch('/me/session/ai/status');
+        if (r.ok) {
+          const data = await r.json();
+          aiEnabled = data.aiEnabled;
+          updateAIButton();
+        }
+      } catch (error) {
+        console.warn('Erro ao carregar status da IA:', error);
+        aiStatusText.textContent = 'Erro';
+      }
+    }
+    
+    function updateAIButton() {
+      const status = aiEnabled ? 'Ativa' : 'Desabilitada';
+      const color = aiEnabled ? '#4CAF50' : '#f44336';
+      
+      aiStatusText.textContent = status;
+      aiToggleBtn.style.backgroundColor = color;
+      aiToggleBtn.title = aiEnabled 
+        ? 'IA está ativa - Clique para desabilitar (atendente assume)'
+        : 'IA desabilitada - Clique para reativar';
+    }
+    
+    async function toggleAI() {
+      try {
+        aiToggleBtn.disabled = true;
+        aiStatusText.textContent = 'Alterando...';
+        
+        const r = await fetch('/me/session/ai/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !aiEnabled })
+        });
+        
+        if (r.ok) {
+          const data = await r.json();
+          aiEnabled = data.aiEnabled;
+          updateAIButton();
+          
+          // Mostrar notificação na conversa
+          const action = aiEnabled ? 'ativada' : 'desabilitada';
+          const who = aiEnabled ? 'IA assumirá as próximas mensagens' : 'Atendente deve responder manualmente';
+          pushMsg('system', `🤖 IA ${action}. ${who}`);
+          
+        } else {
+          const error = await r.json().catch(() => ({}));
+          pushMsg('system', `❌ Erro: ${error.message || 'Falha ao alterar IA'}`);
+        }
+      } catch (error) {
+        pushMsg('system', `❌ Erro de conexão: ${error.message}`);
+      } finally {
+        aiToggleBtn.disabled = false;
+      }
+    }
+    
+    // Event listeners
+    aiToggleBtn.onclick = toggleAI;
     resolveSession();
 
     function pushMsg(who, content) {
       const el = document.createElement('div');
-      el.className = 'msg ' + (who === 'me' ? 'me' : 'bot');
-      el.textContent = content;
+      
+      if (who === 'system') {
+        el.className = 'msg system';
+        el.innerHTML = content; // Permite HTML para ícones
+      } else {
+        el.className = 'msg ' + (who === 'me' ? 'me' : 'bot');
+        el.textContent = content;
+      }
+      
       list.appendChild(el);
       list.scrollTop = list.scrollHeight;
     }

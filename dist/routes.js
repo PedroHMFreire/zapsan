@@ -8,6 +8,7 @@ const express_1 = require("express");
 const wa_1 = require("./wa");
 const mediaProcessor_1 = require("./mediaProcessor");
 const supaUsers_1 = require("./supaUsers");
+const userProfiles_1 = require("./userProfiles");
 const multer_1 = __importDefault(require("multer"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -570,6 +571,167 @@ r.post('/me/session/regen-qr', async (req, res) => {
     if (!uid)
         return res.status(401).json({ error: 'unauthenticated' });
     const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
+    // 🤖 === ROTAS DE CONTROLE DA IA ===
+    // Toggle IA para sessão específica
+    r.post('/sessions/:id/ai/toggle', async (req, res) => {
+        try {
+            const sessionId = req.params.id;
+            const { enabled } = req.body;
+            if (typeof enabled !== 'boolean') {
+                return res.status(400).json({ error: 'bad_request', message: 'Campo "enabled" deve ser true ou false' });
+            }
+            const result = (0, wa_1.toggleAI)(sessionId, enabled, req.body.userId);
+            if (!result.ok) {
+                return res.status(404).json({ error: 'session_not_found', message: result.message });
+            }
+            return res.json(result);
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // Status da IA para sessão específica
+    r.get('/sessions/:id/ai/status', async (req, res) => {
+        try {
+            const sessionId = req.params.id;
+            const result = (0, wa_1.getAIStatus)(sessionId);
+            if (!result.ok) {
+                return res.status(404).json({ error: 'session_not_found', message: result.message });
+            }
+            return res.json(result);
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // Toggle IA para a sessão do usuário logado
+    r.post('/me/session/ai/toggle', async (req, res) => {
+        try {
+            const uid = (req.cookies?.uid) || '';
+            if (!uid)
+                return res.status(401).json({ error: 'unauthenticated' });
+            const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
+            const { enabled } = req.body;
+            if (typeof enabled !== 'boolean') {
+                return res.status(400).json({ error: 'bad_request', message: 'Campo "enabled" deve ser true ou false' });
+            }
+            const result = (0, wa_1.toggleAI)(sessionId, enabled, uid);
+            return res.json(result);
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // Status da IA para a sessão do usuário logado
+    r.get('/me/session/ai/status', async (req, res) => {
+        try {
+            const uid = (req.cookies?.uid) || '';
+            if (!uid)
+                return res.status(401).json({ error: 'unauthenticated' });
+            const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
+            const result = (0, wa_1.getAIStatus)(sessionId);
+            return res.json(result);
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // 👤 === ROTAS DE PERFIL DE USUÁRIO ===
+    // Get user profile
+    r.get('/me/profile', async (req, res) => {
+        try {
+            const uid = (req.cookies?.uid) || '';
+            if (!uid)
+                return res.status(401).json({ error: 'unauthenticated' });
+            const profile = await (0, userProfiles_1.getUserProfile)(uid);
+            return res.json({ profile });
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // Update user profile
+    r.post('/me/profile', async (req, res) => {
+        try {
+            const uid = (req.cookies?.uid) || '';
+            if (!uid)
+                return res.status(401).json({ error: 'unauthenticated' });
+            const { botName, businessName, botTone, products, rules, memory } = req.body;
+            const profile = await (0, userProfiles_1.createOrUpdateUserProfile)(uid, {
+                botName,
+                businessName,
+                botTone,
+                products: Array.isArray(products) ? products : [],
+                rules: Array.isArray(rules) ? rules : [],
+                memory: Array.isArray(memory) ? memory : []
+            });
+            return res.json({ profile });
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // Get user knowledge base
+    r.get('/me/knowledge', async (req, res) => {
+        try {
+            const uid = (req.cookies?.uid) || '';
+            if (!uid)
+                return res.status(401).json({ error: 'unauthenticated' });
+            const knowledge = await (0, userProfiles_1.getUserKnowledge)(uid);
+            return res.json({ knowledge });
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // Update user knowledge base
+    r.post('/me/knowledge', async (req, res) => {
+        try {
+            const uid = (req.cookies?.uid) || '';
+            if (!uid)
+                return res.status(401).json({ error: 'unauthenticated' });
+            const { sections } = req.body;
+            if (!Array.isArray(sections)) {
+                return res.status(400).json({ error: 'bad_request', message: 'sections deve ser um array' });
+            }
+            const validSections = sections.filter(s => typeof s === 'object' &&
+                typeof s.title === 'string' &&
+                typeof s.content === 'string');
+            if (validSections.length !== sections.length) {
+                return res.status(400).json({ error: 'bad_request', message: 'Todas as seções devem ter title e content' });
+            }
+            const knowledge = await (0, userProfiles_1.updateUserKnowledge)(uid, validSections);
+            return res.json({ knowledge });
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
+    // Initialize user data structure (for new users)
+    r.post('/me/init', async (req, res) => {
+        try {
+            const uid = (req.cookies?.uid) || '';
+            if (!uid)
+                return res.status(401).json({ error: 'unauthenticated' });
+            await (0, userProfiles_1.createUserDataStructure)(uid);
+            // Create default profile if doesn't exist
+            const existingProfile = await (0, userProfiles_1.getUserProfile)(uid);
+            if (!existingProfile) {
+                await (0, userProfiles_1.createOrUpdateUserProfile)(uid, {
+                    botName: 'Meu Atendente',
+                    businessName: 'Minha Empresa',
+                    botTone: 'Vendedor consultivo e simpático',
+                    products: ['Produto 1', 'Produto 2'],
+                    rules: ['Seja prestativo e claro', 'Pergunte preferências do cliente'],
+                    memory: ['Informação importante sobre o negócio']
+                });
+            }
+            return res.json({ ok: true, message: 'Dados do usuário inicializados' });
+        }
+        catch (err) {
+            return res.status(500).json({ error: 'internal_error', message: err?.message });
+        }
+    });
     try {
         await (0, wa_1.createOrLoadSession)(sessionId);
     }

@@ -90,6 +90,7 @@ Pode usar variáveis no formato `${VAR}` que serão substituídas se existirem e
 | PORT | Porta HTTP | 3000 |
 | OPENAI_API_KEY | Chave para chamadas reais à OpenAI | (vazio => fallback) |
 | OPENAI_MODEL | Modelo da API Chat | gpt-4o-mini |
+| AI_AUTO_REPLY | Se =0, desativa resposta automática da IA | (ativo) |
 | BOT_NAME | Nome do atendente | Atendente Santê |
 | BUSINESS_NAME | Nome do negócio | Santê Moda |
 | SYNC_FULL_HISTORY | Se =1, tenta sincronizar histórico completo ao conectar sessão | 0 |
@@ -117,6 +118,8 @@ Pode usar variáveis no formato `${VAR}` que serão substituídas se existirem e
 3. Mensagem não envia: formato do número deve terminar com `@s.whatsapp.net` e a sessão deve estar conectada.
 4. IA sempre mesma resposta: provavelmente sem `OPENAI_API_KEY`, está usando fallback local.
 5. Erro de modelo: troque `OPENAI_MODEL` para um modelo válido que sua conta suporta.
+6. IA não responde: verifique se `AI_AUTO_REPLY=0` não está definido (por padrão está ativo).
+7. Resposta muito genérica: edite a base de conhecimento em `/admin/knowledge.html`.
 
 ## Observabilidade / Métricas
 Endpoint `GET /metrics` retorna algo como:

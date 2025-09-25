@@ -2,6 +2,8 @@ export type ReplyInput = {
   text: string
   from: string
   sessionId: string
+  timestamp?: number
+  userId?: string
 }
 
 export type JsonOk = { ok: true; [k: string]: any }

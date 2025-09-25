@@ -24,6 +24,24 @@ import https from 'https'
 import { EventEmitter } from 'events'
 import { processMedia, MediaInfo } from './mediaProcessor'
 import { createPersistentAuthState, saveAuthToSupabase } from './persistentAuth'
+import { reply } from './ai'
+
+// 📊 Helper to get userId from sessionId
+async function getUserIdFromSession(sessionId: string): Promise<string | null> {
+  try {
+    const { data, error } = await supa
+      .from('sessions')
+      .select('user_id')
+      .eq('session_id', sessionId)
+      .single()
+    
+    if (error || !data) return null
+    return data.user_id || null
+  } catch (error) {
+    console.warn('Failed to get userId from session:', error)
+    return null
+  }
+}
 
 // Mantém comportamento antigo: pasta local "sessions".
 // Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
@@ -124,6 +142,10 @@ async function prepareAuthState(baseDir:string, sessionId: string){
   }>
   manualMode?: boolean
   scanGraceUntil?: number
+  // 🤖 Estado da IA
+  aiEnabled?: boolean
+  aiToggledBy?: string
+  aiToggledAt?: number
 }
 
 const sessions = new Map<string, Sess>()
@@ -607,6 +629,63 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
               console.warn('[wa][prisma][message_create][warn]', sessionId, e?.message)
             }
           }
+
+          // 🤖 RESPOSTA AUTOMÁTICA DA IA (apenas para mensagens recebidas)
+          const sess = sessions.get(sessionId)
+          const aiGlobalEnabled = process.env.AI_AUTO_REPLY !== '0'
+          const aiSessionEnabled = sess?.aiEnabled !== false // Por padrão ativado
+          
+          if (!fromMe && text && text.trim() && aiGlobalEnabled && aiSessionEnabled) {
+            try {
+              console.log(`[wa][ai][trigger] ${from}: "${text.slice(0, 50)}..."`)
+              
+              // Get userId for personalized AI response
+              const userId = await getUserIdFromSession(sessionId)
+              
+              // Chamar IA com contexto da mensagem
+              const aiResponse = await reply({
+                text: text.trim(),
+                from,
+                sessionId,
+                timestamp: ts,
+                userId: userId || undefined
+              })
+              
+              if (aiResponse && aiResponse.trim()) {
+                // Enviar resposta automática
+                const jidFormatted = from.includes('@') ? from : `${from}@s.whatsapp.net`
+                await sock.sendMessage(jidFormatted, { text: aiResponse })
+                
+                console.log(`[wa][ai][sent] → ${from}: "${aiResponse.slice(0, 50)}..."`)
+                
+                // Registrar mensagem enviada pela IA
+                const aiMsgId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                const aiMsgObj = {
+                  id: aiMsgId,
+                  from: sock.user?.id || sessionId,
+                  to: from,
+                  text: aiResponse,
+                  fromMe: true,
+                  timestamp: Date.now()
+                }
+                
+                // Salvar no store e broadcast
+                pushMsg(sessionId, aiMsgObj)
+                try { appendMessage(sessionId, { ...aiMsgObj, fromMe: true }) } catch {}
+                try { broadcast(sessionId, 'message', aiMsgObj) } catch {}
+              }
+            } catch (aiError: any) {
+              console.warn('[wa][ai][error]', sessionId, from, aiError?.message)
+              // Em caso de erro da IA, não trava o fluxo normal
+            }
+          } else if (!fromMe && text && text.trim()) {
+            // Log quando IA está desabilitada
+            if (!aiGlobalEnabled) {
+              console.log(`[wa][ai][disabled_global] ${from}: "${text.slice(0, 30)}..." (AI_AUTO_REPLY=0)`)
+            } else if (!aiSessionEnabled) {
+              console.log(`[wa][ai][disabled_session] ${from}: "${text.slice(0, 30)}..." (atendente assumiu)`)
+            }
+          }
         } catch(err:any){
           try { console.warn('[wa][messages.upsert][err]', sessionId, err && (err as any).message) } catch {}
         }
@@ -939,4 +1018,63 @@ export function onMessageStream(sessionId: string, cb: (m: Msg)=>void): () => vo
   const fn = (m: Msg) => cb(m)
   b.on('message', fn)
   return () => b.off('message', fn)
+}
+
+// 🤖 === CONTROLE DE IA ===
+export function toggleAI(sessionId: string, enabled: boolean, userId?: string): { ok: boolean; aiEnabled: boolean; message: string } {
+  const sess = sessions.get(sessionId)
+  if (!sess) {
+    return { ok: false, aiEnabled: false, message: 'Sessão não encontrada' }
+  }
+  
+  const previousState = sess.aiEnabled !== false // Por padrão ativado
+  sess.aiEnabled = enabled
+  sess.aiToggledBy = userId || 'unknown'
+  sess.aiToggledAt = Date.now()
+  
+  const action = enabled ? 'ativou' : 'desativou'
+  const who = userId ? `usuário ${userId}` : 'sistema'
+  console.log(`[wa][ai][toggle] ${who} ${action} IA para sessão ${sessionId}`)
+  
+  return { 
+    ok: true, 
+    aiEnabled: enabled,
+    message: `IA ${enabled ? 'ativada' : 'desativada'} com sucesso`
+  }
+}
+
+export function getAIStatus(sessionId: string): { 
+  ok: boolean
+  aiEnabled: boolean
+  aiGlobalEnabled: boolean
+  toggledBy?: string
+  toggledAt?: number
+  message: string
+} {
+  const sess = sessions.get(sessionId)
+  const aiGlobalEnabled = process.env.AI_AUTO_REPLY !== '0'
+  
+  if (!sess) {
+    return { 
+      ok: false, 
+      aiEnabled: false,
+      aiGlobalEnabled,
+      message: 'Sessão não encontrada' 
+    }
+  }
+  
+  const aiSessionEnabled = sess.aiEnabled !== false // Por padrão ativado
+  
+  return { 
+    ok: true,
+    aiEnabled: aiSessionEnabled && aiGlobalEnabled,
+    aiGlobalEnabled,
+    toggledBy: sess.aiToggledBy,
+    toggledAt: sess.aiToggledAt,
+    message: aiSessionEnabled && aiGlobalEnabled 
+      ? 'IA ativa e funcionando'
+      : !aiGlobalEnabled 
+        ? 'IA desabilitada globalmente (AI_AUTO_REPLY=0)'
+        : 'IA desabilitada para esta sessão (atendente assumiu)'
+  }
 }
