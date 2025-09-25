@@ -140,9 +140,9 @@
       <span class="icon">⏰</span>
       <span>Agendar</span>
     </a>
-    <a href="#" class="bottom-nav-item" data-nav="settings">
-      <span class="icon">⚙️</span>
-      <span>Config</span>
+    <a href="#" class="bottom-nav-item" data-nav="contacts">
+      <span class="icon">📞</span>
+      <span>Contatos</span>
     </a>
   </nav>
 
@@ -226,6 +226,80 @@
     </div>
   </div>
 
+  <!-- Modal Gerenciar Contatos -->
+  <div class="modal" id="contacts-modal" aria-hidden="true">
+    <div class="modal-content" style="max-width: 800px;">
+      <div class="modal-h">
+        <h3 style="margin: 0;">📞 Gerenciar Contatos</h3>
+        <button class="close-btn" data-close-contacts aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <!-- Barra de Ferramentas -->
+        <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+          <input type="text" id="contact-search" placeholder="🔍 Buscar contatos..." class="input" style="flex: 1; min-width: 200px;">
+          <button type="button" class="btn" id="add-contact-btn">➕ Adicionar</button>
+          <button type="button" class="btn outline" id="import-contacts-btn">📥 Importar</button>
+          <button type="button" class="btn outline" id="export-contacts-btn">📤 Exportar</button>
+        </div>
+
+        <!-- Estatísticas -->
+        <div id="contact-stats" style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;">
+          <div class="badge">Total: <span id="stats-total">0</span></div>
+          <div class="badge">Com notas: <span id="stats-notes">0</span></div>
+          <div class="badge">Tags: <span id="stats-tags">0</span></div>
+        </div>
+
+        <!-- Lista de Contatos -->
+        <div id="contacts-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--wa-border); border-radius: 12px;">
+          <div id="contacts-empty" style="text-align: center; padding: 40px; color: var(--muted);">
+            <p>📱 Nenhum contato encontrado</p>
+            <p style="font-size: 0.9rem;">Adicione contatos manualmente ou importe de uma planilha</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Adicionar/Editar Contato -->
+  <div class="modal" id="contact-form-modal" aria-hidden="true">
+    <div class="modal-content">
+      <div class="modal-h">
+        <h3 id="contact-form-title" style="margin: 0;">Adicionar Contato</h3>
+        <button class="close-btn" data-close-contact-form aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="contact-form">
+          <div class="field">
+            <label for="contact-name">Nome *</label>
+            <input type="text" id="contact-name" class="input" placeholder="Nome do contato" required>
+          </div>
+          <div class="field">
+            <label for="contact-phone">Telefone *</label>
+            <input type="tel" id="contact-phone" class="input" placeholder="5598999999999" required>
+            <div class="help">Formato: código do país + DDD + número (ex: 5598999999999)</div>
+          </div>
+          <div class="field">
+            <label for="contact-tags">Tags</label>
+            <input type="text" id="contact-tags" class="input" placeholder="cliente, importante, família">
+            <div class="help">Separe as tags por vírgula</div>
+          </div>
+          <div class="field">
+            <label for="contact-notes">Notas</label>
+            <textarea id="contact-notes" class="input" placeholder="Observações sobre o contato..." rows="3"></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-f">
+        <button type="button" class="btn outline" data-close-contact-form>Cancelar</button>
+        <button type="button" class="btn" id="save-contact-btn">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Input oculto para importação -->
+  <input type="file" id="import-file-input" accept=".csv,.xlsx,.xls" style="display: none;">
+
+  <script src="/contacts.js"></script>
   <script>
   // Util toast
   function toast(msg,type='ok'){
@@ -277,22 +351,35 @@
 
   // Função para formatar JID em nome legível
   function formatContactName(jid) {
-    const contact = contactsMap.get(jid);
-    if (contact && contact.name) {
-      return contact.name;
+    if (!jid) return 'Desconhecido';
+    
+    // Extrair número do JID
+    const phone = jid.includes('@') ? jid.split('@')[0] : jid;
+    
+    // 🆕 USAR SISTEMA DE CONTATOS
+    const contactName = contactManager.getContactName(phone);
+    
+    // Se encontrou nome no sistema, retorna
+    if (contactName && contactName !== phone) {
+      return contactName;
     }
     
-    // Fallback: extrair número do JID se não tiver nome salvo
-    if (jid && jid.includes('@')) {
-      const number = jid.split('@')[0];
-      // Se é um número brasileiro, formatar melhor
-      if (number.startsWith('55') && number.length >= 12) {
-        return `+${number.substr(0,2)} ${number.substr(2,2)} ${number.substr(4,5)}-${number.substr(9)}`;
-      }
-      return `+${number}`;
+    // Fallback: verificar contactsMap antigo (compatibilidade)
+    const oldContact = contactsMap.get(jid);
+    if (oldContact && oldContact.name && oldContact.name !== jid) {
+      return oldContact.name;
     }
     
-    return jid || 'Desconhecido';
+    // Fallback: formatar número bonito
+    if (phone.startsWith('55') && phone.length >= 12) {
+      const ddd = phone.substring(2, 4);
+      const number = phone.substring(4);
+      const part1 = number.substring(0, number.length - 4);
+      const part2 = number.substring(number.length - 4);
+      return `+55 (${ddd}) ${part1}-${part2}`;
+    }
+    
+    return `+${phone}`;
   }
 
   // Cache de fotos de perfil
@@ -1751,7 +1838,253 @@
           console.log('📊 Performance Stats:', stats)
         }, 5000)
       }
+
+      // 📞 SISTEMA DE CONTATOS - Inicialização
+      initContactSystem()
     })
+
+  // === SISTEMA DE CONTATOS ===
+  function initContactSystem() {
+    // Event listeners para navegação
+    const contactsNavItem = document.querySelector('[data-nav="contacts"]')
+    contactsNavItem?.addEventListener('click', (e) => {
+      e.preventDefault()
+      openContactsModal()
+    })
+
+    // Event listeners dos modais
+    setupContactModalEvents()
+    setupContactFormEvents()
+  }
+
+  function setupContactModalEvents() {
+    const modal = document.getElementById('contacts-modal')
+    const closeBtn = modal.querySelector('[data-close-contacts]')
+    const searchInput = document.getElementById('contact-search')
+    const addBtn = document.getElementById('add-contact-btn')
+    const importBtn = document.getElementById('import-contacts-btn')
+    const exportBtn = document.getElementById('export-contacts-btn')
+
+    // Fechar modal
+    closeBtn?.addEventListener('click', () => closeModal('contacts-modal'))
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal('contacts-modal')
+    })
+
+    // Busca de contatos
+    searchInput?.addEventListener('input', (e) => {
+      renderContactsList(e.target.value)
+    })
+
+    // Adicionar contato
+    addBtn?.addEventListener('click', () => openContactForm())
+
+    // Importar contatos
+    importBtn?.addEventListener('click', () => {
+      document.getElementById('import-file-input').click()
+    })
+
+    // Exportar contatos
+    exportBtn?.addEventListener('click', () => exportContacts())
+
+    // Input de arquivo
+    const fileInput = document.getElementById('import-file-input')
+    fileInput?.addEventListener('change', (e) => {
+      if (e.target.files[0]) {
+        importContacts(e.target.files[0])
+        e.target.value = '' // Reset input
+      }
+    })
+  }
+
+  function setupContactFormEvents() {
+    const modal = document.getElementById('contact-form-modal')
+    const form = document.getElementById('contact-form')
+    const closeBtn = modal.querySelector('[data-close-contact-form]')
+    const saveBtn = document.getElementById('save-contact-btn')
+
+    // Fechar modal
+    closeBtn?.addEventListener('click', () => closeModal('contact-form-modal'))
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal('contact-form-modal')
+    })
+
+    // Salvar contato
+    saveBtn?.addEventListener('click', () => saveContact())
+    form?.addEventListener('submit', (e) => {
+      e.preventDefault()
+      saveContact()
+    })
+  }
+
+  function openContactsModal() {
+    document.getElementById('contacts-modal').setAttribute('aria-hidden', 'false')
+    renderContactsList()
+    updateContactStats()
+  }
+
+  function openContactForm(contact = null) {
+    const modal = document.getElementById('contact-form-modal')
+    const title = document.getElementById('contact-form-title')
+    const form = document.getElementById('contact-form')
+    
+    if (contact) {
+      title.textContent = 'Editar Contato'
+      document.getElementById('contact-name').value = contact.name
+      document.getElementById('contact-phone').value = contact.phone
+      document.getElementById('contact-tags').value = contact.tags.join(', ')
+      document.getElementById('contact-notes').value = contact.notes || ''
+      form.dataset.editPhone = contact.phone
+    } else {
+      title.textContent = 'Adicionar Contato'
+      form.reset()
+      delete form.dataset.editPhone
+    }
+    
+    modal.setAttribute('aria-hidden', 'false')
+    document.getElementById('contact-name').focus()
+  }
+
+  function closeModal(modalId) {
+    document.getElementById(modalId).setAttribute('aria-hidden', 'true')
+  }
+
+  function renderContactsList(searchQuery = '') {
+    const contacts = searchQuery 
+      ? contactManager.searchContacts(searchQuery)
+      : contactManager.getAllContacts()
+    
+    const container = document.getElementById('contacts-list')
+    const emptyState = document.getElementById('contacts-empty')
+    
+    if (contacts.length === 0) {
+      emptyState.style.display = 'block'
+      container.innerHTML = ''
+      container.appendChild(emptyState)
+      return
+    }
+    
+    emptyState.style.display = 'none'
+    
+    container.innerHTML = contacts.map(contact => `
+      <div class="contact-item" style="display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--wa-border); gap: 12px;">
+        <div class="contact-avatar" style="width: 40px; height: 40px; border-radius: 50%; background: var(--wa-accent); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;">
+          ${contact.name.charAt(0).toUpperCase()}
+        </div>
+        <div class="contact-info" style="flex: 1; min-width: 0;">
+          <div class="contact-name" style="font-weight: 600; margin-bottom: 2px;">${contact.name}</div>
+          <div class="contact-phone" style="font-size: 0.9rem; color: var(--muted); margin-bottom: 2px;">${formatPhoneForDisplay(contact.phone)}</div>
+          ${contact.tags.length ? `<div class="contact-tags" style="font-size: 0.8rem;">${contact.tags.map(tag => `<span style="background: var(--wa-accent); color: white; padding: 2px 6px; border-radius: 10px; margin-right: 4px;">${tag}</span>`).join('')}</div>` : ''}
+          ${contact.notes ? `<div class="contact-notes" style="font-size: 0.85rem; color: var(--muted); margin-top: 4px;">${contact.notes}</div>` : ''}
+        </div>
+        <div class="contact-actions" style="display: flex; gap: 8px;">
+          <button type="button" class="icon-btn" onclick="openContactForm(contactManager.getContact('${contact.phone}'))" title="Editar">✏️</button>
+          <button type="button" class="icon-btn" onclick="deleteContact('${contact.phone}')" title="Excluir" style="color: #e74c3c;">🗑️</button>
+        </div>
+      </div>
+    `).join('')
+  }
+
+  function updateContactStats() {
+    const stats = contactManager.getStats()
+    document.getElementById('stats-total').textContent = stats.total
+    document.getElementById('stats-notes').textContent = stats.withNotes
+    document.getElementById('stats-tags').textContent = stats.tags.length
+  }
+
+  function saveContact() {
+    const form = document.getElementById('contact-form')
+    const name = document.getElementById('contact-name').value.trim()
+    const phone = document.getElementById('contact-phone').value.trim()
+    const tags = document.getElementById('contact-tags').value.split(',').map(t => t.trim()).filter(Boolean)
+    const notes = document.getElementById('contact-notes').value.trim() || undefined
+    
+    if (!name || !phone) {
+      toast('Nome e telefone são obrigatórios', 'err')
+      return
+    }
+    
+    try {
+      contactManager.addContact(phone, name, tags, notes)
+      toast('Contato salvo com sucesso!', 'ok')
+      closeModal('contact-form-modal')
+      renderContactsList()
+      updateContactStats()
+    } catch (error) {
+      toast('Erro ao salvar contato: ' + error.message, 'err')
+    }
+  }
+
+  function deleteContact(phone) {
+    if (confirm('Deseja realmente excluir este contato?')) {
+      if (contactManager.removeContact(phone)) {
+        toast('Contato excluído com sucesso!', 'ok')
+        renderContactsList()
+        updateContactStats()
+      } else {
+        toast('Erro ao excluir contato', 'err')
+      }
+    }
+  }
+
+  async function importContacts(file) {
+    try {
+      const result = await contactManager.importFromFile(file)
+      
+      if (result.success > 0) {
+        toast(`${result.success} contatos importados com sucesso!`, 'ok')
+        renderContactsList()
+        updateContactStats()
+      }
+      
+      if (result.errors.length > 0) {
+        console.warn('Erros na importação:', result.errors)
+        toast(`Importação concluída com ${result.errors.length} erros. Verifique o console.`, 'warn')
+      }
+    } catch (error) {
+      toast('Erro ao importar contatos: ' + error.message, 'err')
+    }
+  }
+
+  function exportContacts() {
+    try {
+      const csv = contactManager.exportContacts()
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const link = document.createElement('a')
+      
+      if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob)
+        link.setAttribute('href', url)
+        link.setAttribute('download', `contatos-zapsan-${new Date().toISOString().split('T')[0]}.csv`)
+        link.style.visibility = 'hidden'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        toast('Contatos exportados com sucesso!', 'ok')
+      }
+    } catch (error) {
+      toast('Erro ao exportar contatos: ' + error.message, 'err')
+    }
+  }
+
+  function formatPhoneForDisplay(phone) {
+    // Formato: +55 (98) 99999-9999
+    if (phone.startsWith('55') && phone.length >= 12) {
+      const ddd = phone.substring(2, 4)
+      const number = phone.substring(4)
+      const part1 = number.substring(0, number.length - 4)
+      const part2 = number.substring(number.length - 4)
+      return `+55 (${ddd}) ${part1}-${part2}`
+    }
+    return phone
+  }
+
+  // Integração com lista de chats - Mostrar nome dos contatos
+  function getDisplayName(jid) {
+    const phone = jid.split('@')[0] // Remove @s.whatsapp.net
+    return contactManager.getContactName(phone)
+  }
   </script>
 </body>
 </html>
