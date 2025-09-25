@@ -3,7 +3,7 @@
  * Implementa cache offline e background sync
  */
 
-const CACHE_VERSION = 'zapsan-v1.2.1-redirect-fix'
+const CACHE_VERSION = 'zapsan-v1.2.2-render-fix'
 const STATIC_CACHE = `${CACHE_VERSION}-static`
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`
 const API_CACHE = `${CACHE_VERSION}-api`
@@ -79,16 +79,22 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const { request } = event
   const url = new URL(request.url)
-  
   // Ignorar requests externos e chrome-extension
   if (url.origin !== self.location.origin) return
-  
-  // CORREÇÃO: Ignorar rotas de autenticação para permitir redirects
-  const authRoutes = ['/login.html', '/auth/', '/logout']
-  if (authRoutes.some(route => url.pathname.includes(route))) {
-    return // Deixa o browser lidar naturalmente com redirects
+
+  // Rotas que nunca devem ser interceptadas pelo SW (para evitar erro de redirect)
+  const excludedRoutes = [
+    '/', '/index.html', '/login.html', '/auth/', '/logout', '/api/auth/', '/me/', '/health', '/healthz'
+  ];
+
+  // Se for navegação principal (destination=document), nunca interceptar
+  if (request.destination === 'document') {
+    // Se for rota excluída OU ambiente de produção, não intercepta
+    if (excludedRoutes.some(route => url.pathname === route || url.pathname.startsWith(route)) || self.location.hostname.includes('onrender.com') || self.location.hostname.includes('render.com')) {
+      return;
+    }
   }
-  
+
   // Estratégia baseada no tipo de recurso
   if (request.method === 'GET') {
     event.respondWith(handleGetRequest(request))
@@ -161,37 +167,51 @@ async function cacheFirst(request, cacheName, ttl = null) {
 // Network First Strategy
 async function networkFirst(request, cacheName, ttl = null) {
   try {
-    // CORREÇÃO: Configurar fetch para seguir redirects automaticamente
-    const response = await fetch(request, {
+    // CORREÇÃO AMPLIADA: Configuração robusta para produção
+    const fetchOptions = {
       redirect: 'follow',
-      credentials: 'same-origin'
-    })
+      credentials: 'same-origin',
+      mode: 'cors',
+      cache: 'no-cache'
+    }
     
-    if (response.ok) {
-      // Clonar response para cache
-      const responseClone = response.clone()
-      
-      // Adicionar timestamp para TTL
-      if (ttl) {
-        const headers = new Headers(responseClone.headers)
-        headers.set('sw-cached-time', Date.now().toString())
+    // Em produção, ser ainda mais permissivo
+    if (self.location.hostname.includes('onrender.com') || 
+        self.location.hostname.includes('render.com')) {
+      fetchOptions.mode = 'same-origin'
+      fetchOptions.credentials = 'include'
+    }
+    
+    const response = await fetch(request, fetchOptions)
+    
+    // Aceitar redirects (3xx) como válidos também
+    if (response.ok || (response.status >= 300 && response.status < 400)) {
+      // Clonar response para cache apenas se não for redirect
+      if (response.ok) {
+        const responseClone = response.clone()
         
-        const modifiedResponse = new Response(responseClone.body, {
-          status: responseClone.status,
-          statusText: responseClone.statusText,
-          headers: headers
-        })
+        // Adicionar timestamp para TTL
+        if (ttl) {
+          const headers = new Headers(responseClone.headers)
+          headers.set('sw-cached-time', Date.now().toString())
+          
+          const modifiedResponse = new Response(responseClone.body, {
+            status: responseClone.status,
+            statusText: responseClone.statusText,
+            headers: headers
+          })
+          
+          caches.open(cacheName).then(cache => {
+            cache.put(request, modifiedResponse)
+          }).catch(err => console.warn('SW: Cache put failed:', err))
+        } else {
+          caches.open(cacheName).then(cache => {
+            cache.put(request, responseClone)
+          }).catch(err => console.warn('SW: Cache put failed:', err))
+        }
         
-        caches.open(cacheName).then(cache => {
-          cache.put(request, modifiedResponse)
-        })
-      } else {
-        caches.open(cacheName).then(cache => {
-          cache.put(request, responseClone)
-        })
+        console.log(`🌐 SW: Network response cached for ${request.url}`)
       }
-      
-      console.log(`🌐 SW: Network response cached for ${request.url}`)
     }
     
     return response
