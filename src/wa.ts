@@ -23,6 +23,7 @@ import http from 'http'
 import https from 'https'
 import { EventEmitter } from 'events'
 import { processMedia, MediaInfo } from './mediaProcessor'
+import { createPersistentAuthState, saveAuthToSupabase } from './persistentAuth'
 
 // Mantém comportamento antigo: pasta local "sessions".
 // Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
@@ -40,32 +41,60 @@ try {
 }
 
 // Wrapper com retry para lidar com condição rara de ENOENT em init auth state (FS lento ou remoção concorrente)
-async function prepareAuthState(baseDir:string){
-  let lastErr:any
-  for(let attempt=1; attempt<=3; attempt++){
+async function prepareAuthState(baseDir:string, sessionId: string){
+  let attempt = 0
+  while(attempt < 3){
     try {
       ensureDir(baseDir)
-      const r = await useMultiFileAuthState(baseDir)
-      if(attempt>1){
-        // eslint-disable-next-line no-console
-        console.warn('[wa][authstate][recovered]', { baseDir, attempt })
+      
+      // Usar sistema persistente que tenta local primeiro, depois Supabase
+      const persistentAuth = createPersistentAuthState(sessionId)
+      await persistentAuth.loadState()
+      
+      // Converter para formato esperado pelo Baileys
+      const authState = {
+        state: {
+          creds: persistentAuth.state.creds,
+          keys: persistentAuth.state.keys
+        },
+        saveCreds: async () => {
+          persistentAuth.state.creds = authState.state.creds
+          persistentAuth.state.keys = authState.state.keys
+          await persistentAuth.saveState()
+        }
       }
-      return r
-    } catch(err:any){
-      lastErr = err
-      if(err?.code === 'ENOENT'){
-        // eslint-disable-next-line no-console
+      
+      // Se não tem credenciais, usar useMultiFileAuthState padrão
+      if (!authState.state.creds) {
+        const standardAuth = await useMultiFileAuthState(baseDir)
+        
+        // Converter para nosso formato persistente
+        authState.state = standardAuth.state
+        authState.saveCreds = async () => {
+          await standardAuth.saveCreds()
+          // Também salvar no Supabase
+          persistentAuth.state.creds = authState.state.creds
+          persistentAuth.state.keys = authState.state.keys
+          await persistentAuth.saveState()
+        }
+      }
+      
+      if(authState?.state?.creds){
+        console.warn('[wa][authstate][recovered]', { baseDir, attempt, hasCreds: !!authState.state.creds })
+      }
+      return authState
+    } catch (err: any) {
+      attempt++
+      if(err.code === 'ENOENT'){
         console.warn('[wa][authstate][retry]', { baseDir, attempt, code: err.code })
-        await new Promise(r=>setTimeout(r, 50*attempt))
-        continue
+        await new Promise(r => setTimeout(r, 500 * attempt))
+      } else {
+        throw err
       }
-      break
     }
   }
-  throw lastErr
-}
-
-type Sess = {
+  throw new Error(`authstate_failed_after_${attempt}_attempts`)
+}type Sess = {
   sock?: WASocket
   baseDir: string
   qr?: string | null
@@ -273,7 +302,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
   const boot = async () => {
   const sess = sessions.get(sessionId)!
   // Usa wrapper resiliente para reduzir risco de ENOENT inicial (principalmente em FS em rede ou após nukeDir simultâneo)
-  const { state, saveCreds } = await prepareAuthState(baseDir)
+  const { state, saveCreds } = await prepareAuthState(baseDir, sessionId)
 
     // >>> Correção 1: usar sempre a versão correta do WhatsApp Web
     const { version } = await fetchLatestBaileysVersion()

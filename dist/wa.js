@@ -68,6 +68,7 @@ const realtime_1 = require("./realtime");
 const db_1 = require("./db");
 const events_1 = require("events");
 const mediaProcessor_1 = require("./mediaProcessor");
+const persistentAuth_1 = require("./persistentAuth");
 // Mantém comportamento antigo: pasta local "sessions".
 // Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
 const SESS_DIR = process.env.SESS_DIR || path_1.default.resolve(process.cwd(), 'sessions');
@@ -84,30 +85,56 @@ catch (err) {
     console.error('[wa][init][error_mkdir]', SESS_DIR, err?.message);
 }
 // Wrapper com retry para lidar com condição rara de ENOENT em init auth state (FS lento ou remoção concorrente)
-async function prepareAuthState(baseDir) {
-    let lastErr;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+async function prepareAuthState(baseDir, sessionId) {
+    let attempt = 0;
+    while (attempt < 3) {
         try {
             ensureDir(baseDir);
-            const r = await (0, baileys_1.useMultiFileAuthState)(baseDir);
-            if (attempt > 1) {
-                // eslint-disable-next-line no-console
-                console.warn('[wa][authstate][recovered]', { baseDir, attempt });
+            // Usar sistema persistente que tenta local primeiro, depois Supabase
+            const persistentAuth = (0, persistentAuth_1.createPersistentAuthState)(sessionId);
+            await persistentAuth.loadState();
+            // Converter para formato esperado pelo Baileys
+            const authState = {
+                state: {
+                    creds: persistentAuth.state.creds,
+                    keys: persistentAuth.state.keys
+                },
+                saveCreds: async () => {
+                    persistentAuth.state.creds = authState.state.creds;
+                    persistentAuth.state.keys = authState.state.keys;
+                    await persistentAuth.saveState();
+                }
+            };
+            // Se não tem credenciais, usar useMultiFileAuthState padrão
+            if (!authState.state.creds) {
+                const standardAuth = await (0, baileys_1.useMultiFileAuthState)(baseDir);
+                // Converter para nosso formato persistente
+                authState.state = standardAuth.state;
+                authState.saveCreds = async () => {
+                    await standardAuth.saveCreds();
+                    // Também salvar no Supabase
+                    persistentAuth.state.creds = authState.state.creds;
+                    persistentAuth.state.keys = authState.state.keys;
+                    await persistentAuth.saveState();
+                };
             }
-            return r;
+            if (authState?.state?.creds) {
+                console.warn('[wa][authstate][recovered]', { baseDir, attempt, hasCreds: !!authState.state.creds });
+            }
+            return authState;
         }
         catch (err) {
-            lastErr = err;
-            if (err?.code === 'ENOENT') {
-                // eslint-disable-next-line no-console
+            attempt++;
+            if (err.code === 'ENOENT') {
                 console.warn('[wa][authstate][retry]', { baseDir, attempt, code: err.code });
-                await new Promise(r => setTimeout(r, 50 * attempt));
-                continue;
+                await new Promise(r => setTimeout(r, 500 * attempt));
             }
-            break;
+            else {
+                throw err;
+            }
         }
     }
-    throw lastErr;
+    throw new Error(`authstate_failed_after_${attempt}_attempts`);
 }
 const sessions = new Map();
 const isManualMode = () => process.env.MANUAL_PAIRING === '1';
@@ -304,7 +331,7 @@ async function createOrLoadSession(sessionId) {
     const boot = async () => {
         const sess = sessions.get(sessionId);
         // Usa wrapper resiliente para reduzir risco de ENOENT inicial (principalmente em FS em rede ou após nukeDir simultâneo)
-        const { state, saveCreds } = await prepareAuthState(baseDir);
+        const { state, saveCreds } = await prepareAuthState(baseDir, sessionId);
         // >>> Correção 1: usar sempre a versão correta do WhatsApp Web
         const { version } = await (0, baileys_1.fetchLatestBaileysVersion)();
         const sock = (0, baileys_1.default)({
