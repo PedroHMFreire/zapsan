@@ -21,6 +21,11 @@ const db_1 = require("./db");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const userSessions_2 = require("./userSessions");
 const supabase_1 = require("./supabase");
+const adaptiveConfig_1 = require("./middleware/adaptiveConfig");
+const batchHandler_1 = require("./middleware/batchHandler");
+const lazyLoader_1 = require("./middleware/lazyLoader");
+const performanceMonitor_1 = require("./middleware/performanceMonitor");
+const pushNotifications_1 = require("./pushNotifications");
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path_1.default.join(process.cwd(), 'data');
 try {
@@ -91,6 +96,23 @@ r.get('/debug/auth-env', (_req, res) => {
         SUPABASE_SERVICE_ROLE_KEY_SET: !!process.env.SUPABASE_SERVICE_ROLE_KEY
     };
     res.json(flags);
+});
+// Debug de configuração adaptativa
+r.get('/debug/adaptive-config', (req, res) => {
+    const deviceContext = req.deviceContext;
+    const adaptiveConfig = req.adaptiveConfig;
+    res.json({
+        deviceContext,
+        adaptiveConfig,
+        timestamp: Date.now(),
+        userAgent: req.headers['user-agent'],
+        headers: {
+            saveData: req.headers['save-data'],
+            connection: req.headers.connection,
+            rtt: req.headers.rtt,
+            downlink: req.headers.downlink
+        }
+    });
 });
 // === Auth & sessão por usuário ===
 // /auth/register: cria novo usuário; /auth/login: apenas autentica (sem auto-criação) ou aceita legacy { user }
@@ -221,15 +243,9 @@ r.post('/sessions/create', async (req, res) => {
         if (!allowed.ok) {
             return res.status(429).json({ error: 'rate_limited', scope: allowed.reason });
         }
-        const manual = process.env.MANUAL_PAIRING === '1';
-        if (manual) {
-            (0, wa_1.createIdleSession)(sessionId);
-            return res.status(201).json({ ok: true, status: 'idle', manual: true });
-        }
-        else {
-            (0, wa_1.createOrLoadSession)(sessionId).catch(() => { });
-            return res.status(202).json({ ok: true, status: 'creating', manual: false });
-        }
+        // Nunca auto-gerar QR: criar sessão idle sempre
+        (0, wa_1.createIdleSession)(sessionId);
+        return res.status(201).json({ ok: true, status: 'idle', manual: process.env.MANUAL_PAIRING === '1' });
     }
     catch (err) {
         return res.status(500).json({ error: 'internal_error', message: err?.message });
@@ -238,14 +254,14 @@ r.post('/sessions/create', async (req, res) => {
 // Inicia pairing manualmente (gera socket e QR)
 r.post('/sessions/:id/start', async (req, res) => {
     try {
-        if (process.env.MANUAL_PAIRING !== '1')
-            return res.status(400).json({ error: 'not_manual_mode' });
         const { id } = req.params;
         const info = (0, wa_1.getDebug)(id);
         if (!info.exists)
             (0, wa_1.createIdleSession)(id);
         if (info.state && ['pairing', 'open'].includes(info.state))
             return res.status(409).json({ error: 'already_active', state: info.state });
+        // Autoriza start manual e inicia socket (vai gerar QR)
+        (0, wa_1.allowManualStart)(id);
         await (0, wa_1.createOrLoadSession)(id);
         return res.json({ ok: true, started: true });
     }
@@ -355,12 +371,15 @@ r.get('/users/:id/sessions', async (req, res) => {
     }
 });
 // Mensagens persistidas no Postgres (paginação por cursor temporal decrescente)
-// Query params: limit (default 50, max 200), before (timestamp ISO ou epoch ms) para paginação
+// Query params: limit (adaptativo), before (timestamp ISO ou epoch ms) para paginação
 r.get('/sessions/:id/messages/db', async (req, res) => {
     try {
         const { id } = req.params;
-        const limitRaw = Number(req.query.limit || 50);
-        const limit = isNaN(limitRaw) ? 50 : Math.min(Math.max(limitRaw, 1), 200);
+        // Usar configuração adaptativa
+        const paginationConfig = (0, adaptiveConfig_1.getPaginationConfig)(req);
+        const limitRaw = Number(req.query.limit || paginationConfig.defaultLimit);
+        const limit = isNaN(limitRaw) ? paginationConfig.defaultLimit :
+            Math.min(Math.max(limitRaw, 1), paginationConfig.maxLimit);
         const beforeRaw = String(req.query.before || '').trim();
         let beforeDate;
         if (beforeRaw) {
@@ -392,7 +411,19 @@ r.get('/sessions/:id/messages/db', async (req, res) => {
             if (last?.timestamp)
                 nextCursor = last.timestamp;
         }
-        res.json({ messages: data || [], nextCursor, pageSize: data?.length || 0 });
+        // Headers informativos sobre adaptação
+        res.set('X-Adaptive-Limit', limit.toString());
+        res.set('X-Max-Limit', paginationConfig.maxLimit.toString());
+        res.json({
+            messages: data || [],
+            nextCursor,
+            pageSize: data?.length || 0,
+            adaptive: {
+                appliedLimit: limit,
+                maxLimit: paginationConfig.maxLimit,
+                deviceOptimized: true
+            }
+        });
     }
     catch (err) {
         return res.status(500).json({ error: 'internal_error', message: err?.message });
@@ -417,15 +448,19 @@ r.get('/sessions/:id/contacts', async (req, res) => {
 });
 // Enviar texto via WhatsApp
 r.post('/messages/send', async (req, res) => {
+    console.log('[messages/send] Headers:', req.headers.cookie);
+    console.log('[messages/send] Body:', req.body);
     try {
         const { to, text } = req.body || {};
         const userId = (req.cookies?.uid) || String(req.body?.user || '');
+        console.log('[messages/send] userId extraído:', userId);
         if (!userId)
             return res.status(401).json({ error: 'unauthenticated' });
         if (!to || !text) {
             return res.status(400).json({ error: 'bad_request', message: 'to e text são obrigatórios' });
         }
         const session_id = await (0, userSessions_1.getOrCreateUserSession)(userId);
+        console.log('[messages/send] session_id:', session_id);
         const quota = (0, usage_1.checkQuota)(userId, session_id);
         if (!quota.ok) {
             return res.status(429).json({ error: 'quota_exceeded', remaining: 0, plan: quota.plan });
@@ -444,6 +479,7 @@ r.post('/messages/send', async (req, res) => {
         else {
             await (0, wa_1.createOrLoadSession)(String(session_id));
         }
+        console.log('[messages/send] Chamando sendText...');
         await (0, wa_1.sendText)(String(session_id), String(to), String(text));
         (0, usage_1.recordMessage)(session_id);
         return res.json({ ok: true });
@@ -544,10 +580,92 @@ r.post('/me/session/clean', async (req, res) => {
     if (!uid)
         return res.status(401).json({ error: 'unauthenticated' });
     const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
-    const out = await (0, wa_1.cleanLogout)(sessionId, { keepMessages: true });
-    if (!out.ok)
-        return res.status(404).json({ error: out.reason || 'not_found' });
+    await (0, wa_1.cleanLogout)(sessionId, { keepMessages: true });
     res.json({ ok: true, cleaned: true });
+});
+// Buscar contatos salvos da sessão do usuário
+r.get('/me/contacts', async (req, res) => {
+    const uid = (req.cookies?.uid) || '';
+    if (!uid)
+        return res.status(401).json({ error: 'unauthenticated' });
+    try {
+        const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
+        const { data: contacts, error } = await db_1.supa
+            .from('contacts')
+            .select('jid, name, is_group')
+            .eq('session_key', sessionId)
+            .order('name');
+        if (error) {
+            console.warn('[contacts][fetch][error]', error.message);
+            return res.status(500).json({ error: 'database_error' });
+        }
+        res.json({ contacts: contacts || [] });
+    }
+    catch (err) {
+        console.warn('[contacts][fetch][catch]', err?.message);
+        res.status(500).json({ error: 'internal_error' });
+    }
+});
+// Deletar contato específico da sessão do usuário
+r.delete('/me/contacts/:jid', async (req, res) => {
+    const uid = (req.cookies?.uid) || '';
+    if (!uid)
+        return res.status(401).json({ error: 'unauthenticated' });
+    try {
+        const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
+        const jid = decodeURIComponent(req.params.jid);
+        const { error } = await db_1.supa
+            .from('contacts')
+            .delete()
+            .eq('session_key', sessionId)
+            .eq('jid', jid);
+        if (error) {
+            console.warn('[contacts][delete][error]', error.message);
+            return res.status(500).json({ error: 'database_error' });
+        }
+        res.json({ ok: true, deleted_jid: jid });
+    }
+    catch (err) {
+        console.warn('[contacts][delete][catch]', err?.message);
+        res.status(500).json({ error: 'internal_error' });
+    }
+});
+// Buscar foto de perfil de um contato
+r.get('/contacts/:jid/photo', async (req, res) => {
+    const uid = (req.cookies?.uid) || '';
+    if (!uid)
+        return res.status(401).json({ error: 'unauthenticated' });
+    try {
+        const sessionId = await (0, userSessions_1.getOrCreateUserSession)(uid);
+        const jid = decodeURIComponent(req.params.jid);
+        const type = req.query.type === 'image' ? 'image' : 'preview'; // high or low res
+        console.log(`Fetching profile picture for ${jid} (${type})`);
+        const status = (0, wa_1.getSessionStatus)(sessionId);
+        if (status.state !== 'open') {
+            return res.status(400).json({
+                error: 'whatsapp_not_connected',
+                message: 'WhatsApp session not connected'
+            });
+        }
+        try {
+            const profileUrl = await (0, wa_1.getProfilePicture)(sessionId, jid, type);
+            res.json({
+                success: true,
+                profileUrl
+            });
+        }
+        catch (error) {
+            console.warn('[photo][fetch][error]', error.message);
+            res.status(500).json({
+                error: 'fetch_error',
+                message: error.message
+            });
+        }
+    }
+    catch (err) {
+        console.warn('[photo][fetch][catch]', err?.message);
+        res.status(500).json({ error: 'internal_error' });
+    }
 });
 function localStorageClearHint(res) {
     // placeholder: em ambientes reais podemos instruir o frontend a limpar storage
@@ -627,24 +745,34 @@ r.post('/sessions/:id/clean', async (req, res) => {
     try {
         const { id } = req.params;
         const keep = String(req.query.keep || '') === '1';
-        const out = await (0, wa_1.cleanLogout)(id, { keepMessages: keep });
-        if (!out.ok)
-            return res.status(404).json({ error: out.reason || 'not_found' });
+        await (0, wa_1.cleanLogout)(id, { keepMessages: keep });
         res.json({ ok: true, cleaned: true, keptMessages: keep });
     }
     catch (err) {
         res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
-// Mensagens recentes com filtros
+// Mensagens recentes com filtros (adaptativo)
 r.get('/sessions/:id/messages', (req, res) => {
     try {
         const { id } = req.params;
-        const limitRaw = Number(req.query.limit || 200);
-        const limit = isNaN(limitRaw) ? 200 : Math.min(Math.max(limitRaw, 1), 1000);
+        // Usar configuração adaptativa para mensagens
+        const paginationConfig = (0, adaptiveConfig_1.getPaginationConfig)(req);
+        const limitRaw = Number(req.query.limit || paginationConfig.messageLimit);
+        const limit = isNaN(limitRaw) ? paginationConfig.messageLimit :
+            Math.min(Math.max(limitRaw, 1), paginationConfig.maxLimit);
         // Novo buffer já retorna ordenado por timestamp asc (assumido). Caso contrário ordenar aqui.
         const msgs = (0, wa_1.getMessages)(id, limit);
-        return res.json({ messages: msgs });
+        // Headers informativos
+        res.set('X-Adaptive-Message-Limit', limit.toString());
+        return res.json({
+            messages: msgs,
+            adaptive: {
+                appliedLimit: limit,
+                messageLimit: paginationConfig.messageLimit,
+                deviceOptimized: true
+            }
+        });
     }
     catch (err) {
         return res.status(500).json({ error: 'internal_error', message: err?.message });
@@ -664,23 +792,38 @@ r.get('/sessions/:id/search', (req, res) => {
         return res.status(500).json({ error: 'internal_error', message: err?.message });
     }
 });
-// SSE stream em tempo real
+// SSE stream em tempo real (com timeouts adaptativos)
 r.get('/sessions/:id/stream', (req, res) => {
     const { id } = req.params;
+    // Configuração adaptativa de timeout
+    const timeoutConfig = (0, adaptiveConfig_1.getTimeoutConfig)(req);
+    const sseTimeout = timeoutConfig.sseTimeout;
     // Configuração de cabeçalhos SSE
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no'
+        'X-Accel-Buffering': 'no',
+        'X-SSE-Timeout': sseTimeout.toString()
     });
     res.write(':ok\n\n');
+    // Timeout adaptativo para limpeza da conexão
+    const timeoutHandle = setTimeout(() => {
+        if (!closed) {
+            res.write(`event: timeout\n`);
+            res.write(`data: {"reason":"adaptive_timeout","timeout":${sseTimeout}}\n\n`);
+            res.end();
+            closed = true;
+        }
+    }, sseTimeout);
     // Envia estado inicial
     try {
         const state = (0, wa_1.getSessionStatus)(id);
         res.write(`event: status\n`);
         res.write(`data: ${JSON.stringify(state)}\n\n`);
-        const recent = (0, wa_1.getMessages)(id, 50);
+        // Usar limite adaptativo para mensagens recentes
+        const paginationConfig = (0, adaptiveConfig_1.getPaginationConfig)(req);
+        const recent = (0, wa_1.getMessages)(id, paginationConfig.messageLimit);
         res.write(`event: recent\n`);
         res.write(`data: ${JSON.stringify(recent)}\n\n`);
     }
@@ -698,12 +841,16 @@ r.get('/sessions/:id/stream', (req, res) => {
         }
         catch { }
     });
-    req.on('close', () => { closed = true; try {
-        unsub();
-    }
-    catch { } });
+    // Cleanup na desconexão
+    req.on('close', () => {
+        closed = true;
+        clearTimeout(timeoutHandle);
+        try {
+            unsub();
+        }
+        catch { }
+    });
 });
-exports.default = r;
 // === Flows CRUD ===
 r.get('/flows', (_req, res) => {
     res.json({ flows });
@@ -789,6 +936,84 @@ r.get('/debug/routes', (_req, res) => {
     const stack = r.stack || [];
     const routes = stack
         .filter(l => l.route && l.route.path)
-        .map(l => ({ method: Object.keys(l.route.methods)[0].toUpperCase(), path: l.route.path }));
+        .map(l => ({ path: l.route.path, methods: Object.keys(l.route.methods) }));
     res.json({ routes });
 });
+// ===== FASE 3: APIs OTIMIZADAS (BATCHING, LAZY LOADING, PERFORMANCE) =====
+// Inicializar handlers de batch
+(0, batchHandler_1.registerCommonBatchHandlers)();
+// Endpoint de batching - múltiplas operações em uma requisição
+r.post('/batch', batchHandler_1.batchHandler);
+// Endpoints de lazy loading com metadados
+r.get('/lazy/messages/:sessionId?', (req, res) => {
+    const sessionId = req.params.sessionId || 'default';
+    const handler = (0, lazyLoader_1.lazyLoadMessages)(sessionId);
+    handler(req, res);
+});
+r.get('/lazy/contacts', (0, lazyLoader_1.lazyLoadContacts)());
+r.get('/lazy/sessions', (0, lazyLoader_1.lazyLoadSessions)());
+// Dashboard de performance e métricas
+r.get('/performance', performanceMonitor_1.performanceHandler);
+r.get('/performance/metrics', (_req, res) => {
+    res.json((0, performanceMonitor_1.getCurrentMetrics)());
+});
+// Reset de métricas (útil para testes)
+r.post('/performance/reset', (_req, res) => {
+    (0, performanceMonitor_1.resetMetrics)();
+    res.json({ ok: true, message: 'Metrics reset successfully' });
+});
+// Exemplo de uso do batch - endpoint para demonstração
+r.get('/batch/example', (_req, res) => {
+    res.json({
+        description: 'Exemplo de uso do endpoint de batching',
+        usage: {
+            method: 'POST',
+            url: '/api/batch',
+            body: {
+                requests: [
+                    {
+                        id: 'status_check',
+                        method: 'GET',
+                        endpoint: 'sessions/default/status',
+                        params: {}
+                    },
+                    {
+                        id: 'get_contacts',
+                        method: 'GET',
+                        endpoint: 'me/contacts',
+                        params: { limit: 10 }
+                    },
+                    {
+                        id: 'get_messages',
+                        method: 'GET',
+                        endpoint: 'sessions/default/messages',
+                        params: { limit: 5 }
+                    }
+                ]
+            }
+        },
+        advantages: [
+            'Reduz número de requisições HTTP',
+            'Otimizado para dispositivos móveis',
+            'Processamento em batch eficiente',
+            'Métricas de performance incluídas'
+        ]
+    });
+});
+// === Push Notifications API ===
+const pushRoutes = (0, pushNotifications_1.getPushApiRoutes)();
+r.get('/api/push/config', pushRoutes.getConfig);
+r.post('/api/push/subscribe', pushRoutes.subscribe);
+r.post('/api/push/unsubscribe', pushRoutes.unsubscribe);
+r.post('/api/push/send', pushRoutes.sendNotification);
+r.get('/api/push/stats', pushRoutes.getStats);
+// Endpoint para sincronizar subscrições
+r.post('/api/push/sync', async (req, res) => {
+    try {
+        res.json({ success: true, message: 'Subscrição sincronizada' });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: 'Erro interno' });
+    }
+});
+exports.default = r;

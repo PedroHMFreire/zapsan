@@ -10,7 +10,7 @@ exports.ensureSessionStarted = ensureSessionStarted;
 exports.listUserSessions = listUserSessions;
 const crypto_1 = __importDefault(require("crypto"));
 const db_1 = require("./db");
-const wa_1 = require("./wa");
+// import { createOrLoadSession } from './wa'
 // Retorna a sessionId mais recente ou cria uma nova vinculada ao userId
 async function getOrCreateUserSession(userId) {
     if (!userId)
@@ -51,7 +51,7 @@ async function setUserSession(userId, sessionId) {
 }
 async function ensureSessionStarted(userId) {
     const sessionId = await getOrCreateUserSession(userId);
-    (0, wa_1.createOrLoadSession)(sessionId).catch(() => { });
+    // Não iniciar automaticamente para evitar gerar QR sem ação manual
     return { sessionId };
 }
 // (Opcional) manter função de listagem antiga para debug, agora vinda do banco

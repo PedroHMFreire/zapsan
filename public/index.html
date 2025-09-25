@@ -2,9 +2,15 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#128C7E" />
   <title>ZapSan</title>
+  <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/mobile-enhancements.css" />
   <script>(function(){
     try {
       const onLogin = location.pathname.endsWith('/login.html');
@@ -96,11 +102,38 @@
       <div class="c-messages" id="messages"></div>
     <form class="c-composer" id="composer">
   <button type="button" class="icon-btn" id="attach" aria-label="Anexar arquivo">📎</button>
-  <textarea class="input" id="text" placeholder="Escreva uma mensagem…" aria-label="Mensagem" rows="1" style="resize:none;overflow:hidden"></textarea>
-  <button type="submit" class="btn" id="send" aria-label="Enviar mensagem">Enviar</button>
+  <div class="input-wrapper">
+    <textarea class="input" id="text" placeholder="Escreva uma mensagem…" aria-label="Mensagem" rows="1" style="resize:none;overflow:hidden"></textarea>
+    <div class="composer-actions">
+      <button type="button" class="icon-btn" id="emoji" aria-label="Emoji" title="Emoji">😊</button>
+      <button type="submit" class="send-btn" id="send" aria-label="Enviar mensagem" title="Enviar">
+        <span>➤</span>
+      </button>
+    </div>
+  </div>
     </form>
     </section>
   </div>
+
+  <!-- Bottom Navigation for Mobile -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <a href="#" class="bottom-nav-item active" data-nav="chats">
+      <span class="icon">💬</span>
+      <span>Chats</span>
+    </a>
+    <a href="#" class="bottom-nav-item" data-nav="status">
+      <span class="icon">📸</span>
+      <span>Status</span>
+    </a>
+    <a href="#" class="bottom-nav-item" data-nav="schedule">
+      <span class="icon">⏰</span>
+      <span>Agendar</span>
+    </a>
+    <a href="#" class="bottom-nav-item" data-nav="settings">
+      <span class="icon">⚙️</span>
+      <span>Config</span>
+    </a>
+  </nav>
 
   <!-- Drawer Perfil -->
   <div class="drawer" id="drw-profile">
@@ -461,6 +494,7 @@
     for (const c of filteredChats) {
       const item = document.createElement('div');
       item.className='chat-item';
+      item.dataset.chatId = c.id; // Para identificação nos gestos
       if(currentChat && currentChat.id===c.id) item.classList.add('is-active');
       if(!currentChat && lastId && lastId===c.id) item.classList.add('is-active');
       
@@ -472,7 +506,15 @@
       // Criar avatar com foto
       const avatarEl = await createAvatarElement(c.id);
       
-      item.innerHTML = `<div class="meta"><div class="name">${displayName} <div class="actions">${star}${deleteBtn}</div></div><div class="last">${escapeHtml(c.last||'')}</div></div><div class="time">${c.time||''} ${unreadBadge}</div>`;
+      // Swipe actions para mobile
+      const swipeActions = `
+        <div class="swipe-actions">
+          <button class="swipe-action star" data-action="star" data-chat="${c.id}">⭐</button>
+          <button class="swipe-action delete" data-action="delete" data-chat="${c.id}">🗑️</button>
+        </div>
+      `;
+      
+      item.innerHTML = `${swipeActions}<div class="meta"><div class="name">${displayName} <div class="actions">${star}${deleteBtn}</div></div><div class="last">${escapeHtml(c.last||'')}</div></div><div class="time">${c.time||''} ${unreadBadge}</div>`;
       
       // Inserir avatar no início
       item.insertBefore(avatarEl, item.firstChild);
@@ -1164,6 +1206,27 @@
   }
   // iniciar SSE após pequeno atraso para garantir session_id e histórico
   setTimeout(startSSE, 800);
+  
+  // ===== MOBILE INITIALIZATION =====
+  // Garantir que mobile sempre comece na view de chats (lista)
+  function initializeMobileView() {
+    const app = document.getElementById('app');
+    const isMobile = window.matchMedia('(max-width:1023px)').matches;
+    
+    if (isMobile) {
+      // Mobile deve sempre começar mostrando lista de chats
+      delete app.dataset.view; // Remove data-view="chat" se existir
+      
+      // Garantir que botão voltar está escondido inicialmente
+      const backBtn = document.getElementById('back');
+      if (backBtn) backBtn.style.display = 'none';
+    }
+  }
+  
+  // Executar na inicialização e quando a tela muda de tamanho
+  initializeMobileView();
+  window.addEventListener('resize', initializeMobileView);
+  
   // ==== Modal utilities & feature mocks ====
   function $(s,root=document){return root.querySelector(s)}
   function show(id){ $(id).classList.add('show') }
@@ -1515,6 +1578,169 @@
       }catch{}
     }
   })();
+  </script>
+  
+  <script src="/virtual-scroller.js"></script>
+  <script src="/lazy-loader.js"></script>
+  <script src="/api-batch-manager.js"></script>
+  <script src="/mobile-gestures.js"></script>
+  <script src="/push-notifications.js"></script>
+  
+  <script>
+    // Service Worker Registration  
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', async () => {
+        try {
+          const registration = await navigator.serviceWorker.register('/sw.js', {
+            scope: '/'
+          })
+          
+          console.log('✅ Service Worker registrado:', registration.scope)
+          
+          // Escutar mensagens do SW
+          navigator.serviceWorker.addEventListener('message', event => {
+            const { type, data } = event.data
+            
+            if (type === 'message-sent') {
+              console.log('📤 Mensagem enviada via background sync:', data)
+              // Atualizar UI se necessário
+            }
+          })
+          
+        } catch (error) {
+          console.error('❌ Erro ao registrar Service Worker:', error)
+        }
+      })
+    }
+    
+    // PWA Install Banner
+    let deferredPrompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault()
+      deferredPrompt = e
+      
+      // Mostrar botão de instalação customizado
+      const installBanner = document.createElement('div')
+      installBanner.className = 'install-banner'
+      installBanner.innerHTML = `
+        <div class="install-content">
+          <span>📱 Instalar ZapSan como app?</span>
+          <button onclick="installPWA()" class="install-btn">Instalar</button>
+          <button onclick="dismissInstallBanner()" class="dismiss-btn">×</button>
+        </div>
+      `
+      
+      document.body.insertBefore(installBanner, document.body.firstChild)
+    })
+    
+    async function installPWA() {
+      if (deferredPrompt) {
+        deferredPrompt.prompt()
+        const result = await deferredPrompt.userChoice
+        
+        if (result.outcome === 'accepted') {
+          console.log('✅ PWA instalado')
+        }
+        
+        deferredPrompt = null
+        dismissInstallBanner()
+      }
+    }
+    
+    function dismissInstallBanner() {
+      const banner = document.querySelector('.install-banner')
+      if (banner) banner.remove()
+    }
+    
+    // Integração otimizações móveis no app principal
+    document.addEventListener('DOMContentLoaded', () => {
+      // Virtual scrolling para listas de mensagens
+      const messagesList = document.querySelector('.messages-list')
+      if (messagesList && window.VirtualMessageScroller) {
+        const virtualScroller = new VirtualMessageScroller(messagesList, {
+          itemHeight: 65,
+          renderAhead: 15,
+          enableInfiniteScroll: true,
+          onLoadMore: async (offset, limit) => {
+            // Carregar mais mensagens da API
+            try {
+              const response = await window.api.get(`/messages?offset=${offset}&limit=${limit}`)
+              return response.messages || []
+            } catch {
+              return []
+            }
+          }
+        })
+      }
+
+      // Lazy loading automático para imagens
+      if (window.lazyLoader) {
+        // Re-scan quando novo conteúdo for adicionado
+        const observer = new MutationObserver(() => {
+          window.lazyLoader.scanAndSetup()
+        })
+        observer.observe(document.body, { childList: true, subtree: true })
+      }
+
+      // Otimizar API calls com batching
+      if (window.api) {
+        // Substituir fetch global para usar sistema de batch
+        const originalFetch = window.fetch
+        window.fetch = function(url, options = {}) {
+          // Use batch system para GET requests
+          if (!options.method || options.method === 'GET') {
+            return window.api.get(url, options)
+          }
+          
+          // Use batch system para POST requests
+          if (options.method === 'POST' && options.body) {
+            try {
+              const body = JSON.parse(options.body)
+              return window.api.post(url, body, options)
+            } catch {
+              return originalFetch(url, options)
+            }
+          }
+          
+          // Fallback para outros casos
+          return originalFetch(url, options)
+        }
+      }
+
+      // Gestures móveis
+      if (window.MobileGestureHandler) {
+        const gestureHandler = new MobileGestureHandler(document.body)
+        
+        // Pull to refresh
+        gestureHandler.onPullToRefresh = () => {
+          location.reload()
+        }
+        
+        // Swipe navigation
+        gestureHandler.onSwipeLeft = () => {
+          const nextButton = document.querySelector('.nav-next')
+          if (nextButton) nextButton.click()
+        }
+        
+        gestureHandler.onSwipeRight = () => {
+          const prevButton = document.querySelector('.nav-prev')
+          if (prevButton) prevButton.click()
+        }
+      }
+
+      // Performance monitoring
+      if ('performance' in window) {
+        setTimeout(() => {
+          const stats = {
+            virtualScroller: window.VirtualMessageScroller?.getGlobalStats?.() || {},
+            lazyLoader: window.lazyLoader?.getStats?.() || {},
+            apiBatcher: window.apiBatcher?.getStats?.() || {}
+          }
+          
+          console.log('📊 Performance Stats:', stats)
+        }, 5000)
+      }
+    })
   </script>
 </body>
 </html>

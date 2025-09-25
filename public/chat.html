@@ -4,7 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ZapSan • Chat</title>
+  <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/mobile-enhancements.css" />
   <script>(function(){try{const a=localStorage.getItem('auth')==='ok';const onL=location.pathname.endsWith('/login.html');if(!a&&!onL){location.replace('/login.html');}if(a&&onL){location.replace('/');}}catch(e){}})();</script>
 </head>
 <body>
@@ -102,6 +104,82 @@
         pushMsg('bot', 'Enviado! A resposta chegará no seu WhatsApp.');
       }
     };
+  </script>
+  
+  <!-- Mobile Performance Scripts -->
+  <script src="/virtual-scroller.js"></script>
+  <script src="/lazy-loader.js"></script>
+  <script src="/api-batch-manager.js"></script>
+  <script src="/mobile-gestures.js"></script>
+  <script src="/push-notifications.js"></script>
+  
+  <script>
+    // Integração das otimizações móveis
+    document.addEventListener('DOMContentLoaded', () => {
+      // Virtual scrolling para messages
+      const messagesContainer = document.getElementById('messages')
+      if (messagesContainer && window.VirtualMessageScroller) {
+        const virtualScroller = new VirtualMessageScroller(messagesContainer, {
+          itemHeight: 60,
+          renderAhead: 10,
+          enableInfiniteScroll: true
+        })
+        
+        // Integrar com pushMsg
+        const originalPushMsg = window.pushMsg
+        window.pushMsg = function(who, content) {
+          // Usar virtual scroller se disponível
+          if (virtualScroller) {
+            virtualScroller.addMessage({ who, content, timestamp: Date.now() })
+          } else {
+            originalPushMsg(who, content)
+          }
+        }
+      }
+      
+      // Otimizar envios com batching
+      if (window.api) {
+        const originalSend = sendBtn.onclick
+        sendBtn.onclick = async () => {
+          if (!session_id) { alert('Aguarde carregar sessão...'); return; }
+          const payload = { session_id, to: to.value, text: text.value };
+          if (!payload.to || !payload.text) return alert('Preencha os campos');
+          
+          pushMsg('me', payload.text);
+          text.value = '';
+          
+          // Usar API batcher para melhor performance
+          try {
+            sendBtn.classList.add('api-loading')
+            await window.api.post('/messages/send', payload)
+            pushMsg('bot', 'Enviado! A resposta chegará no seu WhatsApp.');
+          } catch (error) {
+            pushMsg('bot', 'Erro: ' + error.message);
+          } finally {
+            sendBtn.classList.remove('api-loading')
+          }
+        }
+      }
+      
+      // Touch gestures se disponível
+      if (window.MobileGestureHandler) {
+        const gestureHandler = new MobileGestureHandler(document.body)
+        
+        // Pull to refresh
+        gestureHandler.onPullToRefresh = () => {
+          if (typeof resolveSession === 'function') {
+            resolveSession()
+          }
+        }
+        
+        // Swipe para limpar chat
+        gestureHandler.onSwipeRight = () => {
+          if (confirm('Limpar conversa?')) {
+            document.getElementById('messages').innerHTML = ''
+          }
+        }
+      }
+    })
   </script>
 </body>
 </html>

@@ -1,0 +1,547 @@
+/* ===== MOBILE-FIRST ENHANCEMENTS ===== */
+
+/* Touch targets minimum 44px (iOS/Android accessibility) */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Enhanced button styles for touch */
+.btn, .icon-btn, .m-btn {
+  touch-action: manipulation; /* Prevents double-tap zoom */
+  -webkit-user-select: none;
+  user-select: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Ripple effect for touch feedback */
+.btn::before, .icon-btn::before, .m-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s, height 0.6s;
+  pointer-events: none;
+}
+
+.btn:active::before, .icon-btn:active::before, .m-btn:active::before {
+  width: 100px;
+  height: 100px;
+}
+
+/* Enhanced scroll behavior */
+.chat-list, .c-messages {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Pull-to-refresh indicator */
+.ptr-indicator {
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--wa-accent);
+  color: white;
+  font-size: 18px;
+  opacity: 0;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.ptr-indicator.visible {
+  opacity: 1;
+  top: 10px;
+}
+
+.ptr-indicator.loading {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: translateX(-50%) rotate(360deg); }
+}
+
+/* Swipe gestures for chat items */
+.chat-item {
+  position: relative;
+  touch-action: pan-y;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-item.swiping {
+  transition: none;
+}
+
+.chat-item .swipe-actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  transform: translateX(100%);
+  z-index: -1;
+}
+
+.chat-item .swipe-action {
+  background: var(--wa-accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-item .swipe-action.delete {
+  background: #e74c3c;
+}
+
+.chat-item .swipe-action.star {
+  background: #f1c40f;
+  color: #333;
+}
+
+/* Long-press context menu */
+.context-menu {
+  position: fixed;
+  background: var(--wa-panel);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 8px 0;
+  z-index: 1000;
+  min-width: 180px;
+  opacity: 0;
+  transform: scale(0.95);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.context-menu.show {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: all;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.context-menu-item.danger {
+  color: #e74c3c;
+}
+
+/* Enhanced input focus for mobile */
+.input:focus {
+  outline: 2px solid var(--wa-accent);
+  outline-offset: 2px;
+  border-color: var(--wa-accent);
+}
+
+/* Composer enhancements */
+.c-composer {
+  padding: 12px;
+  background: var(--wa-card);
+  border-top: 1px solid var(--wa-border);
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+
+.c-composer .input-wrapper {
+  position: relative;
+  flex: 1;
+}
+
+.c-composer textarea.input {
+  resize: none;
+  padding-right: 100px; /* Space for emoji and send buttons */
+}
+
+.c-composer .composer-actions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.c-composer .send-btn {
+  background: var(--wa-accent);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.6;
+  transform: scale(0.9);
+}
+
+.c-composer .send-btn.ready {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.c-composer .send-btn:active {
+  transform: scale(0.95);
+}
+
+/* Haptic feedback classes */
+.haptic-light { /* Light impact feedback */ }
+.haptic-medium { /* Medium impact feedback */ }
+.haptic-heavy { /* Heavy impact feedback */ }
+
+/* Smooth state transitions */
+.chat-item, .msg, .btn, .icon-btn {
+  will-change: transform;
+}
+
+/* Mobile keyboard adaptations */
+@media (max-height: 600px) {
+  .c-messages {
+    padding-bottom: 60px; /* Space for keyboard */
+  }
+  
+  .topbar {
+    position: fixed;
+    width: 100%;
+    z-index: 100;
+  }
+  
+  .app {
+    padding-top: 60px;
+  }
+}
+
+/* Touch-friendly message bubbles */
+.msg {
+  position: relative;
+  margin: 2px 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.msg.selected {
+  background: rgba(37, 211, 102, 0.2);
+  outline: 2px solid var(--wa-accent);
+  outline-offset: 2px;
+}
+
+/* Enhanced loading states */
+.loading-shimmer {
+  background: linear-gradient(90deg, 
+    var(--wa-border) 0%, 
+    rgba(255,255,255,0.1) 50%, 
+    var(--wa-border) 100%
+  );
+  background-size: 200% 100%;
+  animation: loading-shimmer 1.5s infinite;
+}
+
+@keyframes loading-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Optimized for thumb navigation */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--wa-panel);
+  border-top: 1px solid var(--wa-border);
+  padding: 8px 16px;
+  display: none; /* Show on mobile */
+  justify-content: space-around;
+  align-items: center;
+  z-index: 100;
+}
+
+/* ===== MOBILE VIEW CONTROL ===== */
+@media (max-width: 1023px) {
+  /* Show bottom nav on mobile */
+  .bottom-nav {
+    display: flex;
+  }
+  
+  /* Add padding for bottom nav */
+  .app {
+    padding-bottom: 60px;
+  }
+  
+  /* Default mobile state: show only sidebar (chat list) */
+  .app {
+    grid-template-columns: 1fr;
+  }
+  
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .chat {
+    display: none;
+  }
+  
+  /* When viewing a specific chat */
+  .app[data-view="chat"] .sidebar {
+    display: none;
+  }
+  
+  .app[data-view="chat"] .chat {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  /* Make sure chat takes full height on mobile */
+  .app[data-view="chat"] .chat {
+    height: calc(100vh - 120px); /* Account for topbar + bottom nav */
+  }
+  
+  /* Chat header on mobile should be prominent */
+  .app[data-view="chat"] .c-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  
+  /* Back button should be visible when in chat view */
+  .app[data-view="chat"] #back {
+    display: inline-block !important;
+  }
+}
+
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 500;
+  transition: all 0.2s;
+  min-width: 60px;
+}
+
+.bottom-nav-item.active {
+  color: var(--wa-accent);
+  background: rgba(37, 211, 102, 0.1);
+}
+
+.bottom-nav-item .icon {
+  font-size: 20px;
+}
+
+/* Prevent zoom on input focus (iOS Safari) */
+@media screen and (-webkit-min-device-pixel-ratio: 0) {
+  select, textarea, input[type="text"] {
+    font-size: 16px;
+  }
+}
+
+/* ===== PWA ENHANCEMENTS ===== */
+
+/* PWA Install Banner */
+.install-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+  color: white;
+  z-index: 10000;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  animation: slideDown 0.3s ease-out;
+}
+
+.install-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.install-btn {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.install-btn:hover {
+  background: rgba(255,255,255,0.3);
+  transform: translateY(-1px);
+}
+
+.dismiss-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 50%;
+  transition: background 0.2s ease;
+}
+
+.dismiss-btn:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Notification Permission Banner */
+.notification-permission-banner {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  color: #856404;
+  padding: 15px;
+  border-radius: 5px;
+  margin: 10px;
+  text-align: center;
+  animation: fadeIn 0.3s ease;
+}
+
+.notification-permission-banner button {
+  background: #25D366;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  margin: 0 5px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.notification-permission-banner button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(37, 211, 102, 0.3);
+}
+
+.notification-permission-banner button:last-child {
+  background: #6c757d;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* PWA Status Indicators */
+.pwa-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(37, 211, 102, 0.1);
+  border-radius: 12px;
+  font-size: 12px;
+  color: #128C7E;
+  font-weight: 500;
+}
+
+.pwa-status.offline {
+  background: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
+}
+
+.pwa-status::before {
+  content: '●';
+  font-size: 8px;
+}
+
+/* App Badge Simulation */
+.app-badge {
+  position: relative;
+}
+
+.app-badge::after {
+  content: attr(data-badge);
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #dc3545;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* Dark mode for PWA */
+@media (prefers-color-scheme: dark) {
+  .install-banner {
+    background: linear-gradient(135deg, #128C7E 0%, #0d7377 100%);
+  }
+  
+  .notification-permission-banner {
+    background: #2d2d2d;
+    border-color: #404040;
+    color: #e0e0e0;
+  }
+}

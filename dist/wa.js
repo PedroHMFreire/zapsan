@@ -41,10 +41,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.allowManualStart = allowManualStart;
 exports.createOrLoadSession = createOrLoadSession;
 exports.createIdleSession = createIdleSession;
 exports.getQR = getQR;
 exports.sendText = sendText;
+exports.getProfilePicture = getProfilePicture;
 exports.sendMedia = sendMedia;
 exports.getStatus = getStatus;
 exports.getDebug = getDebug;
@@ -107,9 +109,46 @@ async function prepareAuthState(baseDir) {
 }
 const sessions = new Map();
 const isManualMode = () => process.env.MANUAL_PAIRING === '1';
+// Função para validar formato brasileiro obrigatório: 55 + DDD + 9 + 8 dígitos
+function normalizeBrazilianPhone(phone) {
+    // Remove todos os caracteres não numéricos
+    const digits = phone.replace(/\D/g, '');
+    // Deve ter exatamente 13 dígitos (55 + 2 DDD + 1 nono dígito + 8 números)
+    if (digits.length !== 13) {
+        throw new Error('Número deve ter 13 dígitos: 55 + DDD + 9 + 8 números');
+    }
+    // Deve começar com 55 (código do Brasil)
+    if (!digits.startsWith('55')) {
+        throw new Error('Número deve começar com 55 (código do Brasil)');
+    }
+    // Extrai DDD (dígitos 3 e 4)
+    const ddd = digits.slice(2, 4);
+    const dddNumber = parseInt(ddd);
+    // Verifica se é um DDD válido (11-99)
+    if (dddNumber < 11 || dddNumber > 99) {
+        throw new Error('DDD inválido. Deve estar entre 11 e 99');
+    }
+    // Verifica se o 5º dígito é 9 (nono dígito obrigatório para celulares)
+    const ninthDigit = digits[4];
+    if (ninthDigit !== '9') {
+        throw new Error('Número de celular deve ter o 9º dígito. Formato: 55 + DDD + 9 + 8 números');
+    }
+    // Se passou por todas as validações, retorna o número
+    return digits;
+}
 const sessionState = new Map();
 const sessionMsgs = new Map();
 const sessionBus = new Map();
+// Dedupe simples para evitar upsert repetido do mesmo contato
+const contactsSeen = new Map();
+function seenSetFor(id) {
+    let s = contactsSeen.get(id);
+    if (!s) {
+        s = new Set();
+        contactsSeen.set(id, s);
+    }
+    return s;
+}
 function busFor(id) { let b = sessionBus.get(id); if (!b) {
     b = new events_1.EventEmitter();
     b.setMaxListeners(100);
@@ -138,6 +177,22 @@ const nukeDir = (dir) => {
     }
     catch { }
 };
+// Helper: detecta se já existe credencial (pareado previamente)
+function hasCreds(dir) {
+    try {
+        return fs_1.default.existsSync(path_1.default.join(dir, 'creds.json'));
+    }
+    catch {
+        return false;
+    }
+}
+// Sinalização de start manual: somente quando presente permitimos iniciar socket sem credenciais
+const manualStartRequests = new Set();
+function allowManualStart(sessionId) {
+    manualStartRequests.add(sessionId);
+    // Evita ficar preso indefinidamente; expira em 60s
+    setTimeout(() => manualStartRequests.delete(sessionId), 60000);
+}
 function loadMeta(baseDir) {
     try {
         const p = path_1.default.join(baseDir, 'meta.json');
@@ -177,14 +232,19 @@ async function createOrLoadSession(sessionId) {
         return;
     const baseDir = path_1.default.join(SESS_DIR, sessionId);
     ensureDir(baseDir);
-    // Upsert sessão status connecting via Supabase
-    try {
-        const { error } = await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'connecting' }, { onConflict: 'session_id' });
-        if (error)
-            console.warn('[wa][supa][session_upsert_connecting][warn]', sessionId, error.message);
-    }
-    catch (err) {
-        console.warn('[wa][supa][session_upsert_connecting][catch]', sessionId, err?.message);
+    // Verifica credenciais existentes e pedido manual
+    const credsPresent = hasCreds(baseDir);
+    const manualRequested = manualStartRequests.has(sessionId);
+    // Upsert sessão status somente quando realmente vamos iniciar conexão
+    if (credsPresent || manualRequested) {
+        try {
+            const { error } = await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'connecting' }, { onConflict: 'session_id' });
+            if (error)
+                console.warn('[wa][supa][session_upsert_connecting][warn]', sessionId, error.message);
+        }
+        catch (err) {
+            console.warn('[wa][supa][session_upsert_connecting][catch]', sessionId, err?.message);
+        }
     }
     // Hidratar histórico persistido (se ainda não carregado em sessionMsgs)
     try {
@@ -226,6 +286,17 @@ async function createOrLoadSession(sessionId) {
     // load persisted meta if exists
     const meta = loadMeta(baseDir);
     const manual = isManualMode();
+    // Se não há credenciais e não foi solicitado manualmente, não iniciar para não gerar QR automaticamente
+    if (!credsPresent && !manualRequested) {
+        const prev = sessions.get(sessionId);
+        sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: prev?.lastState || 'idle', restartCount: meta.restartCount || (current?.restartCount || 0), criticalCount: meta.criticalCount || (current?.criticalCount || 0), lastDisconnectCode: meta.lastDisconnectCode, lastOpenAt: meta.lastOpenAt, manualMode: manual, messages: prev?.messages || [] });
+        sessionState.set(sessionId, 'closed');
+        try {
+            await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'closed' }, { onConflict: 'session_id' });
+        }
+        catch { }
+        return;
+    }
     sessions.set(sessionId, { baseDir, starting: true, startingSince: Date.now(), qr: null, restartCount: meta.restartCount || (current?.restartCount || 0), criticalCount: meta.criticalCount || (current?.criticalCount || 0), lastDisconnectCode: meta.lastDisconnectCode, lastOpenAt: meta.lastOpenAt, manualMode: manual });
     sessionState.set(sessionId, 'connecting');
     const boot = async () => {
@@ -246,6 +317,9 @@ async function createOrLoadSession(sessionId) {
             logger: (0, pino_1.default)({ level: process.env.BAILEYS_LOG_LEVEL || 'warn' }),
         });
         sess.sock = sock;
+        // Consome o pedido manual (se existia)
+        if (manualStartRequests.has(sessionId))
+            manualStartRequests.delete(sessionId);
         sess.starting = false;
         sess.qr = null;
         if (!sess.messages)
@@ -278,7 +352,7 @@ async function createOrLoadSession(sessionId) {
                             sess.firstQRAt = sess.lastQRAt;
                         sess.qrGenCount = (sess.qrGenCount || 0) + 1;
                         if (sess.manualMode) {
-                            const grace = Number(process.env.SCAN_GRACE_MS || 25000);
+                            const grace = Number(process.env.SCAN_GRACE_MS || 20000);
                             sess.scanGraceUntil = Date.now() + grace;
                         }
                         console.warn('[wa][qr][new]', sessionId, { qrGenCount: sess.qrGenCount, sinceFirstMs: sess.firstQRAt ? Date.now() - sess.firstQRAt : null, manual: !!sess.manualMode });
@@ -299,7 +373,7 @@ async function createOrLoadSession(sessionId) {
                                 catch { }
                                 const restartCount = (sess.restartCount || 0) + 1;
                                 sessions.set(sessionId, { baseDir: sess.baseDir, starting: false, qr: null, lastState: 'restarting', restartCount, criticalCount: sess.criticalCount, qrDataUrl: null, nextRetryAt: Date.now() + 1500 });
-                                setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), 1500);
+                                setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), 15000);
                                 return;
                             }
                         }
@@ -409,6 +483,29 @@ async function createOrLoadSession(sessionId) {
                     const ts = Math.floor(tsRaw);
                     const msgObj = { id, from, to, text, fromMe, timestamp: ts };
                     pushMsg(sessionId, msgObj);
+                    // Auto-cadastro do contato no primeiro contato (leve e idempotente)
+                    try {
+                        if (!fromMe && from) {
+                            const seen = seenSetFor(sessionId);
+                            if (!seen.has(from)) {
+                                seen.add(from);
+                                const isGroup = from.endsWith('@g.us');
+                                const numberOrJid = from.replace(/@.*/, '');
+                                const provisionalName = isGroup ? null : (m.pushName || numberOrJid);
+                                try {
+                                    const { error } = await db_1.supa.from('contacts').upsert({ session_key: sessionId, jid: from, name: provisionalName, is_group: isGroup }, { onConflict: 'session_key,jid' });
+                                    if (!error) {
+                                        try {
+                                            (0, realtime_1.broadcast)(sessionId, 'contact_upsert', { jid: from, name: provisionalName, is_group: isGroup });
+                                        }
+                                        catch { }
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                    catch { }
                     // Persistir em disco e indexar para busca/histórico
                     try {
                         (0, messageStore_1.appendMessage)(sessionId, { ...msgObj, text, fromMe });
@@ -554,10 +651,48 @@ async function sendText(sessionId, to, text) {
     const s = sessions.get(sessionId);
     if (!s?.sock)
         throw new Error('session_not_found');
-    const jid = to.includes('@s.whatsapp.net') || to.includes('@g.us')
-        ? to
-        : `${to.replace(/\D/g, '')}@s.whatsapp.net`;
-    await s.sock.sendMessage(jid, { text });
+    let jid;
+    if (to.includes('@s.whatsapp.net') || to.includes('@g.us')) {
+        jid = to;
+    }
+    else {
+        try {
+            // Valida formato brasileiro obrigatório: 55 + DDD + 9 + 8 dígitos
+            const normalizedPhone = normalizeBrazilianPhone(to);
+            jid = `${normalizedPhone}@s.whatsapp.net`;
+        }
+        catch (error) {
+            console.log(`[sendText] ❌ Erro de validação: ${error.message}`);
+            throw new Error(`Formato de número inválido: ${error.message}`);
+        }
+    }
+    console.log(`[sendText] Original: ${to} → Normalizado: ${jid}`);
+    console.log(`[sendText] Enviando para ${jid}: ${text}`);
+    try {
+        await s.sock.sendMessage(jid, { text });
+        console.log(`[sendText] ✅ Mensagem enviada com sucesso para ${jid}`);
+    }
+    catch (error) {
+        console.error(`[sendText] ❌ Erro ao enviar para ${jid}:`, error.message);
+        throw error;
+    }
+}
+// Buscar foto de perfil de um contato
+async function getProfilePicture(sessionId, jid, type = 'preview') {
+    const s = sessions.get(sessionId);
+    if (!s?.sock)
+        throw new Error('session_not_found');
+    try {
+        const profileUrl = await s.sock.profilePictureUrl(jid, type);
+        return profileUrl || null;
+    }
+    catch (error) {
+        // Se não existe foto de perfil, Baileys retorna erro 404
+        if (error.output?.statusCode === 404 || error.message?.includes('item-not-found')) {
+            return null;
+        }
+        throw error;
+    }
 }
 // Envio de mídia genérico
 async function sendMedia(sessionId, to, filePath, options) {
@@ -652,10 +787,10 @@ function getAllSessionMeta() {
 // Efetua logout (se possível) e remove credenciais para forçar novo pareamento limpo
 async function cleanLogout(sessionId, { keepMessages = false } = {}) {
     const sess = sessions.get(sessionId);
-    if (!sess)
-        return { ok: false, reason: 'not_found' };
+    const baseDir = sess?.baseDir || path_1.default.join(SESS_DIR, sessionId);
+    // Tentar logout/fechar socket caso exista
     try {
-        if (sess.sock) {
+        if (sess?.sock) {
             try {
                 await sess.sock.logout?.();
             }
@@ -667,19 +802,24 @@ async function cleanLogout(sessionId, { keepMessages = false } = {}) {
         }
     }
     catch { }
-    // Remover diretório de credenciais
+    // Remover diretório de credenciais (mesmo se sessão não está em memória)
     try {
-        nukeDir(sess.baseDir);
+        nukeDir(baseDir);
     }
     catch { }
     // Preservar mensagens em memória opcionalmente
-    const preservedMsgs = keepMessages ? (sess.messages ? [...sess.messages] : []) : undefined;
+    const preservedMsgs = keepMessages ? (sess?.messages ? [...sess.messages] : []) : undefined;
     sessions.delete(sessionId);
     if (keepMessages) {
         // Recria placeholder da sessão somente com mensagens preservadas (sem sock)
-        sessions.set(sessionId, { baseDir: path_1.default.join(SESS_DIR, sessionId), messages: preservedMsgs });
+        sessions.set(sessionId, { baseDir, messages: preservedMsgs || [] });
     }
-    return { ok: true };
+    // Opcional: refletir no banco status "closed"
+    try {
+        await db_1.supa.from('sessions').upsert({ session_id: sessionId, status: 'closed' }, { onConflict: 'session_id' });
+    }
+    catch { }
+    return { ok: true, cleaned: true };
 }
 // Remove TODAS as sessões (memória + diretórios). Uso cuidadoso.
 function nukeAllSessions() {

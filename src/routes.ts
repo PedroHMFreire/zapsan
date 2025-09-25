@@ -19,6 +19,11 @@ import { supa } from './db'
 import bcrypt from 'bcrypt'
 import { setUserSession, ensureSessionStarted } from './userSessions'
 import { hasSupabaseEnv } from './supabase'
+import { getPaginationConfig, getPerformanceConfig, getTimeoutConfig } from './middleware/adaptiveConfig'
+import { batchHandler, registerCommonBatchHandlers } from './middleware/batchHandler'
+import { lazyLoadMessages, lazyLoadContacts, lazyLoadSessions } from './middleware/lazyLoader'
+import { performanceHandler, getCurrentMetrics, resetMetrics } from './middleware/performanceMonitor'
+import { getPushApiRoutes } from './pushNotifications'
 
 // === Simple JSON persistence helpers ===
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -85,6 +90,25 @@ r.get('/debug/auth-env', (_req: Request, res: Response) => {
     SUPABASE_SERVICE_ROLE_KEY_SET: !!process.env.SUPABASE_SERVICE_ROLE_KEY
   }
   res.json(flags)
+})
+
+// Debug de configuração adaptativa
+r.get('/debug/adaptive-config', (req: Request, res: Response) => {
+  const deviceContext = req.deviceContext
+  const adaptiveConfig = req.adaptiveConfig
+  
+  res.json({
+    deviceContext,
+    adaptiveConfig,
+    timestamp: Date.now(),
+    userAgent: req.headers['user-agent'],
+    headers: {
+      saveData: req.headers['save-data'],
+      connection: req.headers.connection,
+      rtt: req.headers.rtt,
+      downlink: req.headers.downlink
+    }
+  })
 })
 
 // === Auth & sessão por usuário ===
@@ -336,12 +360,17 @@ r.get('/users/:id/sessions', async (req: Request, res: Response) => {
 })
 
 // Mensagens persistidas no Postgres (paginação por cursor temporal decrescente)
-// Query params: limit (default 50, max 200), before (timestamp ISO ou epoch ms) para paginação
+// Query params: limit (adaptativo), before (timestamp ISO ou epoch ms) para paginação
 r.get('/sessions/:id/messages/db', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const limitRaw = Number(req.query.limit || 50)
-    const limit = isNaN(limitRaw) ? 50 : Math.min(Math.max(limitRaw, 1), 200)
+    
+    // Usar configuração adaptativa
+    const paginationConfig = getPaginationConfig(req)
+    const limitRaw = Number(req.query.limit || paginationConfig.defaultLimit)
+    const limit = isNaN(limitRaw) ? paginationConfig.defaultLimit : 
+                  Math.min(Math.max(limitRaw, 1), paginationConfig.maxLimit)
+    
     const beforeRaw = String(req.query.before||'').trim()
     let beforeDate: Date | undefined
     if(beforeRaw){
@@ -353,6 +382,7 @@ r.get('/sessions/:id/messages/db', async (req: Request, res: Response) => {
         if(!isNaN(d.getTime())) beforeDate = d
       }
     }
+    
     // Busca mensagens direto por session_key
     let query = supa.from('messages')
       .select('*')
@@ -364,12 +394,27 @@ r.get('/sessions/:id/messages/db', async (req: Request, res: Response) => {
     }
     const { data, error } = await query
     if(error) return res.status(500).json({ error: 'internal_error', detail: error.message })
+    
     let nextCursor: string | null = null
     if(data && data.length === limit){
       const last = data[data.length - 1]
       if(last?.timestamp) nextCursor = last.timestamp
     }
-    res.json({ messages: data||[], nextCursor, pageSize: data?.length||0 })
+    
+    // Headers informativos sobre adaptação
+    res.set('X-Adaptive-Limit', limit.toString())
+    res.set('X-Max-Limit', paginationConfig.maxLimit.toString())
+    
+    res.json({ 
+      messages: data||[], 
+      nextCursor, 
+      pageSize: data?.length||0,
+      adaptive: {
+        appliedLimit: limit,
+        maxLimit: paginationConfig.maxLimit,
+        deviceOptimized: true
+      }
+    })
   } catch(err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -685,15 +730,31 @@ r.post('/sessions/:id/clean', async (req: Request, res: Response) => {
   }
 })
 
-// Mensagens recentes com filtros
+// Mensagens recentes com filtros (adaptativo)
 r.get('/sessions/:id/messages', (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const limitRaw = Number(req.query.limit || 200)
-    const limit = isNaN(limitRaw) ? 200 : Math.min(Math.max(limitRaw, 1), 1000)
+    
+    // Usar configuração adaptativa para mensagens
+    const paginationConfig = getPaginationConfig(req)
+    const limitRaw = Number(req.query.limit || paginationConfig.messageLimit)
+    const limit = isNaN(limitRaw) ? paginationConfig.messageLimit : 
+                  Math.min(Math.max(limitRaw, 1), paginationConfig.maxLimit)
+    
     // Novo buffer já retorna ordenado por timestamp asc (assumido). Caso contrário ordenar aqui.
     const msgs = getMessagesNew(id, limit)
-    return res.json({ messages: msgs })
+    
+    // Headers informativos
+    res.set('X-Adaptive-Message-Limit', limit.toString())
+    
+    return res.json({ 
+      messages: msgs,
+      adaptive: {
+        appliedLimit: limit,
+        messageLimit: paginationConfig.messageLimit,
+        deviceOptimized: true
+      }
+    })
   } catch (err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
   }
@@ -712,23 +773,43 @@ r.get('/sessions/:id/search', (req: Request, res: Response) => {
   }
 })
 
-// SSE stream em tempo real
+// SSE stream em tempo real (com timeouts adaptativos)
 r.get('/sessions/:id/stream', (req: Request, res: Response) => {
   const { id } = req.params
+  
+  // Configuração adaptativa de timeout
+  const timeoutConfig = getTimeoutConfig(req)
+  const sseTimeout = timeoutConfig.sseTimeout
+  
   // Configuração de cabeçalhos SSE
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no'
+    'X-Accel-Buffering': 'no',
+    'X-SSE-Timeout': sseTimeout.toString()
   })
   res.write(':ok\n\n')
+  
+  // Timeout adaptativo para limpeza da conexão
+  const timeoutHandle = setTimeout(() => {
+    if (!closed) {
+      res.write(`event: timeout\n`)
+      res.write(`data: {"reason":"adaptive_timeout","timeout":${sseTimeout}}\n\n`)
+      res.end()
+      closed = true
+    }
+  }, sseTimeout)
+  
   // Envia estado inicial
   try {
     const state = getSessionStatus(id)
     res.write(`event: status\n`)
     res.write(`data: ${JSON.stringify(state)}\n\n`)
-    const recent = getMessagesNew(id, 50)
+    
+    // Usar limite adaptativo para mensagens recentes
+    const paginationConfig = getPaginationConfig(req)
+    const recent = getMessagesNew(id, paginationConfig.messageLimit)
     res.write(`event: recent\n`)
     res.write(`data: ${JSON.stringify(recent)}\n\n`)
   } catch {}
@@ -743,10 +824,14 @@ r.get('/sessions/:id/stream', (req: Request, res: Response) => {
       res.write(`data: ${JSON.stringify(payload)}\n\n`)
     } catch {}
   })
-  req.on('close', () => { closed = true; try { unsub() } catch {} })
+  
+  // Cleanup na desconexão
+  req.on('close', () => { 
+    closed = true
+    clearTimeout(timeoutHandle)
+    try { unsub() } catch {} 
+  })
 })
-
-export default r
 
 // === Flows CRUD ===
 r.get('/flows', (_req: Request, res: Response) => {
@@ -834,6 +919,95 @@ r.get('/debug/routes', (_req: Request, res: Response) => {
   const stack: any[] = (r as any).stack || []
   const routes = stack
     .filter(l => l.route && l.route.path)
-    .map(l => ({ method: Object.keys(l.route.methods)[0].toUpperCase(), path: l.route.path }))
+    .map(l => ({ path: l.route.path, methods: Object.keys(l.route.methods) }))
   res.json({ routes })
 })
+
+// ===== FASE 3: APIs OTIMIZADAS (BATCHING, LAZY LOADING, PERFORMANCE) =====
+
+// Inicializar handlers de batch
+registerCommonBatchHandlers()
+
+// Endpoint de batching - múltiplas operações em uma requisição
+r.post('/batch', batchHandler)
+
+// Endpoints de lazy loading com metadados
+r.get('/lazy/messages/:sessionId?', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId || 'default'
+  const handler = lazyLoadMessages(sessionId)
+  handler(req, res)
+})
+
+r.get('/lazy/contacts', lazyLoadContacts())
+r.get('/lazy/sessions', lazyLoadSessions())
+
+// Dashboard de performance e métricas
+r.get('/performance', performanceHandler)
+r.get('/performance/metrics', (_req: Request, res: Response) => {
+  res.json(getCurrentMetrics())
+})
+
+// Reset de métricas (útil para testes)
+r.post('/performance/reset', (_req: Request, res: Response) => {
+  resetMetrics()
+  res.json({ ok: true, message: 'Metrics reset successfully' })
+})
+
+// Exemplo de uso do batch - endpoint para demonstração
+r.get('/batch/example', (_req: Request, res: Response) => {
+  res.json({
+    description: 'Exemplo de uso do endpoint de batching',
+    usage: {
+      method: 'POST',
+      url: '/api/batch',
+      body: {
+        requests: [
+          {
+            id: 'status_check',
+            method: 'GET',
+            endpoint: 'sessions/default/status',
+            params: {}
+          },
+          {
+            id: 'get_contacts',
+            method: 'GET', 
+            endpoint: 'me/contacts',
+            params: { limit: 10 }
+          },
+          {
+            id: 'get_messages',
+            method: 'GET',
+            endpoint: 'sessions/default/messages',
+            params: { limit: 5 }
+          }
+        ]
+      }
+    },
+    advantages: [
+      'Reduz número de requisições HTTP',
+      'Otimizado para dispositivos móveis',
+      'Processamento em batch eficiente',
+      'Métricas de performance incluídas'
+    ]
+  })
+})
+
+// === Push Notifications API ===
+const pushRoutes = getPushApiRoutes()
+
+r.get('/api/push/config', pushRoutes.getConfig)
+r.post('/api/push/subscribe', pushRoutes.subscribe)  
+r.post('/api/push/unsubscribe', pushRoutes.unsubscribe)
+r.post('/api/push/send', pushRoutes.sendNotification)
+r.get('/api/push/stats', pushRoutes.getStats)
+
+// Endpoint para sincronizar subscrições
+r.post('/api/push/sync', async (req: Request, res: Response) => {
+  try {
+    res.json({ success: true, message: 'Subscrição sincronizada' })
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Erro interno' })
+  }
+})
+
+export default r
