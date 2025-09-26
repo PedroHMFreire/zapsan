@@ -263,11 +263,13 @@ async function prepareAuthState(baseDir, sessionId) {
             await persistentAuth.loadState();
             // Se não tem credenciais, usar useMultiFileAuthState padrão
             if (!persistentAuth.state.creds) {
+                console.log(`[auth][init] Sem credenciais existentes para ${sessionId}, criando nova sessão`);
                 const standardAuth = await (0, baileys_1.useMultiFileAuthState)(baseDir);
                 // Criar auth state que combina ambos os sistemas
                 const authState = {
                     state: standardAuth.state,
                     saveCreds: async () => {
+                        console.log(`[auth][save] Salvando credenciais para ${sessionId}`);
                         await standardAuth.saveCreds();
                         // Também salvar no Supabase
                         persistentAuth.state.creds = standardAuth.state.creds;
@@ -558,8 +560,17 @@ async function createOrLoadSession(sessionId) {
         const sess = sessions.get(sessionId);
         // Usa wrapper resiliente para reduzir risco de ENOENT inicial (principalmente em FS em rede ou após nukeDir simultâneo)
         const { state, saveCreds } = await prepareAuthState(baseDir, sessionId);
+        // Verificar se as credenciais são válidas antes de tentar conectar
+        if (state.creds && !state.creds.me) {
+            console.warn(`[wa][start] Credenciais inválidas para ${sessionId}, limpando para nova autenticação`);
+            await cleanCorruptedSession(sessionId, baseDir);
+            // Recriar auth state limpo
+            const freshAuth = await prepareAuthState(baseDir, sessionId);
+            Object.assign(state, freshAuth.state);
+        }
         // >>> Correção 1: usar sempre a versão correta do WhatsApp Web
         const { version } = await (0, baileys_1.fetchLatestBaileysVersion)();
+        console.log(`[wa][start] Criando socket para ${sessionId} com versão ${version}`);
         const sock = (0, baileys_1.default)({
             version,
             auth: state,
@@ -670,6 +681,18 @@ async function createOrLoadSession(sessionId) {
                 sess.lastDisconnectCode = code;
                 saveMeta(sess);
                 const isStreamErrored = code === 515 || u.lastDisconnect?.error?.message?.includes('Stream Errored');
+                // Log detalhado para diagnóstico de Stream Error (515)
+                if (isStreamErrored) {
+                    console.error(`[wa][streamError] Erro de stream (515) para ${sessionId}:`, {
+                        code,
+                        hasCredentials: !!state.creds,
+                        hasValidMe: !!(state.creds?.me),
+                        errorMessage: u.lastDisconnect?.error?.message,
+                        everOpened: sess.everOpened,
+                        criticalCount: sess.criticalCount || 0,
+                        baseDir: sess.baseDir
+                    });
+                }
                 const isLoggedOut = code === 401 ||
                     u.lastDisconnect?.error?.output?.statusCode === baileys_1.DisconnectReason.loggedOut;
                 // Log detalhado para diagnóstico de loggedOut

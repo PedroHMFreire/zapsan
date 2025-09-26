@@ -232,12 +232,14 @@ async function prepareAuthState(baseDir:string, sessionId: string){
       
       // Se não tem credenciais, usar useMultiFileAuthState padrão
       if (!persistentAuth.state.creds) {
+        console.log(`[auth][init] Sem credenciais existentes para ${sessionId}, criando nova sessão`)
         const standardAuth = await useMultiFileAuthState(baseDir)
         
         // Criar auth state que combina ambos os sistemas
         const authState = {
           state: standardAuth.state,
           saveCreds: async () => {
+            console.log(`[auth][save] Salvando credenciais para ${sessionId}`)
             await standardAuth.saveCreds()
             // Também salvar no Supabase
             persistentAuth.state.creds = standardAuth.state.creds
@@ -563,20 +565,31 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
   // Usa wrapper resiliente para reduzir risco de ENOENT inicial (principalmente em FS em rede ou após nukeDir simultâneo)
   const { state, saveCreds } = await prepareAuthState(baseDir, sessionId)
 
-    // >>> Correção 1: usar sempre a versão correta do WhatsApp Web
-    const { version } = await fetchLatestBaileysVersion()
+  // Verificar se as credenciais são válidas antes de tentar conectar
+  if (state.creds && !state.creds.me) {
+    console.warn(`[wa][start] Credenciais inválidas para ${sessionId}, limpando para nova autenticação`)
+    await cleanCorruptedSession(sessionId, baseDir)
+    // Recriar auth state limpo
+    const freshAuth = await prepareAuthState(baseDir, sessionId)
+    Object.assign(state, freshAuth.state)
+  }
 
-    const sock = makeWASocket({
-      version,
-      auth: state,
-      printQRInTerminal: false,        // seu front já consome o QR
-      browser: ['Ubuntu', 'Chrome', '121'],
-      keepAliveIntervalMs: 30_000,
-      // Controlado por env: SYNC_FULL_HISTORY=1 para puxar histórico ao conectar
-      syncFullHistory: process.env.SYNC_FULL_HISTORY === '1',
-      markOnlineOnConnect: false,
-      logger: pino({ level: (process.env.BAILEYS_LOG_LEVEL as pino.Level) || 'warn' }),
-    })
+  // >>> Correção 1: usar sempre a versão correta do WhatsApp Web
+  const { version } = await fetchLatestBaileysVersion()
+
+  console.log(`[wa][start] Criando socket para ${sessionId} com versão ${version}`)
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false,        // seu front já consome o QR
+    browser: ['Ubuntu', 'Chrome', '121'],
+    keepAliveIntervalMs: 30_000,
+    // Controlado por env: SYNC_FULL_HISTORY=1 para puxar histórico ao conectar
+    syncFullHistory: process.env.SYNC_FULL_HISTORY === '1',
+    markOnlineOnConnect: false,
+    logger: pino({ level: (process.env.BAILEYS_LOG_LEVEL as pino.Level) || 'warn' }),
+  })
 
   sess.sock = sock
     // Consome o pedido manual (se existia)
@@ -669,6 +682,19 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
         const isStreamErrored =
           code === 515 || (u.lastDisconnect?.error as any)?.message?.includes('Stream Errored')
+
+        // Log detalhado para diagnóstico de Stream Error (515)
+        if (isStreamErrored) {
+          console.error(`[wa][streamError] Erro de stream (515) para ${sessionId}:`, {
+            code,
+            hasCredentials: !!state.creds,
+            hasValidMe: !!(state.creds?.me),
+            errorMessage: (u.lastDisconnect?.error as any)?.message,
+            everOpened: sess.everOpened,
+            criticalCount: sess.criticalCount || 0,
+            baseDir: sess.baseDir
+          })
+        }
 
         const isLoggedOut =
           code === 401 ||

@@ -212,27 +212,34 @@ export function createPersistentAuthState(sessionId: string) {
             
             console.log('[auth][load][local][keys]', sessionId, Object.keys(this.state.keys).length, 'keys loaded')
           }
-          
           console.log('[auth][load][local][ok]', sessionId)
           return this.state
+        } else {
+          console.log('[auth][load][local][not_found]', sessionId, 'creds.json não existe')
         }
       } catch (err) {
         console.warn('[auth][load][local][error]', sessionId, err)
       }
       
       // Se não existe local, tentar Supabase
+      console.log('[auth][load][supabase][trying]', sessionId)
       const supabaseAuth = await loadAuthFromSupabase(sessionId)
       if (supabaseAuth) {
         this.state.creds = supabaseAuth.creds
         this.state.keys = supabaseAuth.keys || {}
         
+        console.log('[auth][load][supabase][ok]', sessionId, 'credenciais recuperadas do Supabase')
+        
         // Salvar localmente para próximas vezes
         this.saveToLocal()
         
         return this.state
+      } else {
+        console.log('[auth][load][supabase][not_found]', sessionId)
       }
       
       // Retornar estado vazio para nova sessão
+      console.log('[auth][load][empty]', sessionId, 'criando nova sessão')
       return this.state
     },
     
