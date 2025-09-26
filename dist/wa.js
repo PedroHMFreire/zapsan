@@ -92,6 +92,82 @@ async function getUserIdFromSession(sessionId) {
 // Mantém comportamento antigo: pasta local "sessions".
 // Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
 const SESS_DIR = process.env.SESS_DIR || path_1.default.resolve(process.cwd(), 'sessions');
+// 🧹 Helper to clean corrupted sessions with error 515
+async function cleanCorruptedSession(sessionId, baseDir) {
+    try {
+        console.warn(`[wa][cleanup] Limpando sessão corrompida: ${sessionId}`);
+        // 1. Remove filesystem data
+        try {
+            nukeDir(baseDir);
+            console.log(`[wa][cleanup] Diretório removido: ${baseDir}`);
+        }
+        catch (err) {
+            console.warn(`[wa][cleanup] Erro ao remover diretório: ${err}`);
+        }
+        // 2. Clean from memory
+        sessions.delete(sessionId);
+        sessionState.delete(sessionId);
+        sessionMsgs.delete(sessionId);
+        // 3. Update database status
+        try {
+            await db_1.supa.from('sessions')
+                .update({ status: 'disconnected' })
+                .eq('session_id', sessionId);
+        }
+        catch (err) {
+            console.warn(`[wa][cleanup] Erro ao atualizar DB: ${err}`);
+        }
+        // 4. Clear any auth cache
+        try {
+            await db_1.supa.from('session_auth')
+                .delete()
+                .eq('session_id', sessionId);
+        }
+        catch (err) {
+            console.warn(`[wa][cleanup] Erro ao limpar auth: ${err}`);
+        }
+        console.log(`[wa][cleanup] Sessão ${sessionId} completamente limpa`);
+    }
+    catch (error) {
+        console.error(`[wa][cleanup] Erro durante limpeza de ${sessionId}:`, error);
+    }
+}
+// 🧹 Cleanup corrupted sessions on startup
+async function cleanupCorruptedSessionsOnStartup() {
+    try {
+        console.log('[wa][startup] Verificando sessões corrompidas...');
+        // Check filesystem for sessions
+        const sessionDirs = fs_1.default.readdirSync(SESS_DIR).filter(dir => {
+            const sessionPath = path_1.default.join(SESS_DIR, dir);
+            try {
+                return fs_1.default.statSync(sessionPath).isDirectory();
+            }
+            catch {
+                return false;
+            }
+        });
+        for (const sessionId of sessionDirs) {
+            const metaPath = path_1.default.join(SESS_DIR, sessionId, 'meta.json');
+            try {
+                if (fs_1.default.existsSync(metaPath)) {
+                    const meta = JSON.parse(fs_1.default.readFileSync(metaPath, 'utf8'));
+                    // If session has error 515 and never opened, clean it
+                    if (meta.lastDisconnectCode === 515 && !meta.everOpened && (meta.criticalCount || 0) >= 2) {
+                        console.warn(`[wa][startup] Limpando sessão corrompida: ${sessionId}`);
+                        await cleanCorruptedSession(sessionId, path_1.default.join(SESS_DIR, sessionId));
+                    }
+                }
+            }
+            catch (err) {
+                console.warn(`[wa][startup] Erro verificando meta de ${sessionId}:`, err);
+            }
+        }
+        console.log('[wa][startup] Limpeza de sessões concluída');
+    }
+    catch (error) {
+        console.error('[wa][startup] Erro durante limpeza:', error);
+    }
+}
 // Garante existência imediata do diretório raiz e reporta (útil para diagnosticar ENOENT / read-only FS)
 try {
     fs_1.default.mkdirSync(SESS_DIR, { recursive: true });
@@ -99,10 +175,48 @@ try {
     // (console.log usado em vez de logger interno para aparecer cedo no Render)
     // eslint-disable-next-line no-console
     console.log('[wa][init] SESS_DIR', SESS_DIR);
+    // 🧹 Clean up any sessions with persistent error 515 on startup
+    cleanupCorruptedSessionsOnStartup();
 }
 catch (err) {
     // eslint-disable-next-line no-console
     console.error('[wa][init][error_mkdir]', SESS_DIR, err?.message);
+    // 🧹 Cleanup corrupted sessions on startup
+    async function cleanupCorruptedSessionsOnStartup() {
+        try {
+            console.log('[wa][startup] Verificando sessões corrompidas...');
+            // Check filesystem for sessions
+            const sessionDirs = fs_1.default.readdirSync(SESS_DIR).filter(dir => {
+                const sessionPath = path_1.default.join(SESS_DIR, dir);
+                try {
+                    return fs_1.default.statSync(sessionPath).isDirectory();
+                }
+                catch {
+                    return false;
+                }
+            });
+            for (const sessionId of sessionDirs) {
+                const metaPath = path_1.default.join(SESS_DIR, sessionId, 'meta.json');
+                try {
+                    if (fs_1.default.existsSync(metaPath)) {
+                        const meta = JSON.parse(fs_1.default.readFileSync(metaPath, 'utf8'));
+                        // If session has error 515 and never opened, clean it
+                        if (meta.lastDisconnectCode === 515 && !meta.everOpened && (meta.criticalCount || 0) >= 2) {
+                            console.warn(`[wa][startup] Limpando sessão corrompida: ${sessionId}`);
+                            await cleanCorruptedSession(sessionId, path_1.default.join(SESS_DIR, sessionId));
+                        }
+                    }
+                }
+                catch (err) {
+                    console.warn(`[wa][startup] Erro verificando meta de ${sessionId}:`, err);
+                }
+            }
+            console.log('[wa][startup] Limpeza de sessões concluída');
+        }
+        catch (error) {
+            console.error('[wa][startup] Erro durante limpeza:', error);
+        }
+    }
 }
 // Wrapper com retry para lidar com condição rara de ENOENT em init auth state (FS lento ou remoção concorrente)
 async function prepareAuthState(baseDir, sessionId) {
@@ -472,10 +586,25 @@ async function createOrLoadSession(sessionId) {
                     const shouldNuke = isLoggedOut || crit >= 3 || (neverOpened && crit >= 2) || crit > 6;
                     console.warn('[wa][disconnect-critical]', sessionId, { code, crit, delay, everOpened: !!sess.everOpened, willNuke: shouldNuke });
                     if (shouldNuke) {
-                        try {
-                            nukeDir(baseDir);
-                        }
-                        catch { }
+                        // Use the new cleanup function for better error 515 handling
+                        await cleanCorruptedSession(sessionId, baseDir);
+                        // Create fresh session entry
+                        sessions.set(sessionId, {
+                            baseDir,
+                            starting: false,
+                            qr: null,
+                            lastState: 'need-qr',
+                            qrDataUrl: null,
+                            restartCount: 0,
+                            criticalCount: 0,
+                            nextRetryAt: Date.now() + delay,
+                            lastDisconnectCode: code,
+                            everOpened: false,
+                            lastOpenAt: undefined
+                        });
+                        // Wait before attempting reconnection
+                        setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), delay);
+                        return;
                     }
                     const restartCount = (sess.restartCount || 0) + 1;
                     sessions.set(sessionId, { baseDir, starting: false, qr: sess.qr || null, lastState: 'restarting', qrDataUrl: sess.qrDataUrl || null, restartCount, criticalCount: sess.criticalCount, nextRetryAt: Date.now() + delay, lastDisconnectCode: sess.lastDisconnectCode, lastOpenAt: sess.lastOpenAt, everOpened: sess.everOpened });

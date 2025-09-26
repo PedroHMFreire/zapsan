@@ -20,7 +20,6 @@ import { recordMessage, checkQuota, getUsage, getPlan } from './usage'
 import { supa } from './db'
 import bcrypt from 'bcrypt'
 import { setUserSession, ensureSessionStarted } from './userSessions'
-import { hasSupabaseEnv } from './supabase'
 import { getPaginationConfig, getPerformanceConfig, getTimeoutConfig } from './middleware/adaptiveConfig'
 import { batchHandler, registerCommonBatchHandlers } from './middleware/batchHandler'
 import { lazyLoadMessages, lazyLoadContacts, lazyLoadSessions } from './middleware/lazyLoader'
@@ -86,7 +85,7 @@ const r = Router()
 // Diagnóstico de ambiente de autenticação (não expõe chaves reais)
 r.get('/debug/auth-env', (_req: Request, res: Response) => {
   const flags = {
-    hasSupabaseEnv: hasSupabaseEnv(),
+    hasSupabaseEnv: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY),
     SUPABASE_URL_SET: !!process.env.SUPABASE_URL,
     SUPABASE_ANON_KEY_SET: !!process.env.SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY_SET: !!process.env.SUPABASE_SERVICE_ROLE_KEY

@@ -22,7 +22,6 @@ const usage_1 = require("./usage");
 const db_1 = require("./db");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const userSessions_2 = require("./userSessions");
-const supabase_1 = require("./supabase");
 const adaptiveConfig_1 = require("./middleware/adaptiveConfig");
 const batchHandler_1 = require("./middleware/batchHandler");
 const lazyLoader_1 = require("./middleware/lazyLoader");
@@ -92,7 +91,7 @@ const r = (0, express_1.Router)();
 // Diagnóstico de ambiente de autenticação (não expõe chaves reais)
 r.get('/debug/auth-env', (_req, res) => {
     const flags = {
-        hasSupabaseEnv: (0, supabase_1.hasSupabaseEnv)(),
+        hasSupabaseEnv: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY),
         SUPABASE_URL_SET: !!process.env.SUPABASE_URL,
         SUPABASE_ANON_KEY_SET: !!process.env.SUPABASE_ANON_KEY,
         SUPABASE_SERVICE_ROLE_KEY_SET: !!process.env.SUPABASE_SERVICE_ROLE_KEY
