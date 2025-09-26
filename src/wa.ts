@@ -53,7 +53,14 @@ async function clearSessionKeys(sessionId: string, reason: string) {
   try {
     const baseDir = path.join(SESS_DIR, sessionId)
     
-    // Remover arquivos de keys específicos que podem estar corrompidos
+    // Para SessionError, ser mais conservador - apenas limpar pre-keys mais antigos
+    if (reason.includes('SessionError') || reason.includes('No session record')) {
+      console.log(`[wa][cleanup] Conservative cleanup for SessionError: ${sessionId} (${reason})`)
+      // Não remover nada, deixar o WhatsApp reestabelecer naturalmente
+      return
+    }
+    
+    // Para PreKey errors mais críticos, remover arquivos específicos
     const keyFilesToRemove = [
       'pre-key-*.json',
       'session-*.json', 
@@ -63,6 +70,7 @@ async function clearSessionKeys(sessionId: string, reason: string) {
     
     if (fs.existsSync(baseDir)) {
       const files = fs.readdirSync(baseDir)
+      let removedCount = 0
       
       for (const pattern of keyFilesToRemove) {
         const regex = new RegExp(pattern.replace('*', '.*'))
@@ -71,15 +79,16 @@ async function clearSessionKeys(sessionId: string, reason: string) {
         for (const file of matchingFiles) {
           try {
             fs.unlinkSync(path.join(baseDir, file))
+            removedCount++
             console.log(`[wa][cleanup] Removed ${file} from ${sessionId} (${reason})`)
           } catch (e) {
             console.warn(`[wa][cleanup] Failed to remove ${file}:`, e)
           }
         }
       }
+      
+      console.log(`[wa][cleanup] Cleared ${removedCount} session key files for ${sessionId} (${reason})`)
     }
-    
-    console.log(`[wa][cleanup] Cleared session keys for ${sessionId} (${reason})`)
   } catch (error) {
     console.warn(`[wa][cleanup] Failed to clear session keys for ${sessionId}:`, error)
   }
@@ -1023,26 +1032,47 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           if (err?.message?.includes('PreKey') || 
               err?.message?.includes('decrypt') || 
               err?.name === 'PreKeyError' ||
-              err?.message?.includes('Invalid PreKey ID')) {
+              err?.name === 'SessionError' ||
+              err?.message?.includes('Invalid PreKey ID') ||
+              err?.message?.includes('No session record')) {
             
             const from = m?.key?.remoteJid || 'unknown'
             
-            console.warn('[wa][decrypt][prekey_error]', sessionId, {
+            console.warn('[wa][decrypt][session_error]', sessionId, {
               from,
               messageId: m?.key?.id,
               error: err.message,
-              type: err.name
+              type: err.name,
+              isSessionRecordError: err?.message?.includes('No session record')
             })
             
-            // Limpar keys problemáticas para este contato específico
+            // Para SessionError "No session record", tentar reestabelecer apenas com este contato
             try {
-              await clearSessionKeys(sessionId, `PreKey error with ${from}`)
-              
-              // Tentar enviar mensagem explicativa (se possível)
-              if (from !== 'unknown') {
+              if (err?.message?.includes('No session record') && from !== 'unknown') {
+                // Enviar mensagem solicitando nova mensagem para reestabelecer chaves
                 await sock.sendMessage(from, { 
-                  text: "⚠️ Detectamos um problema de sincronização. As mensagens anteriores podem não ter sido recebidas. Por favor, envie uma nova mensagem."
+                  text: "⚠️ Problema de sincronização detectado. Por favor, envie uma nova mensagem para restabelecer a conexão."
                 })
+                
+                console.log(`[wa][decrypt] Solicitando reestabelecimento de chaves com ${from}`)
+                
+                // Tentar solicitar nova sessão E2E com este contato específico
+                try {
+                  // Forçar um novo handshake de criptografia enviando uma mensagem vazia
+                  await sock.sendMessage(from, { text: '' })
+                } catch (handshakeError) {
+                  console.warn(`[wa][handshake] Erro ao tentar reestabelecer com ${from}:`, handshakeError)
+                }
+                
+              } else {
+                // Para outros erros mais críticos, limpar keys problemáticas
+                await clearSessionKeys(sessionId, `${err.name || 'Decrypt'} error with ${from}`)
+                
+                if (from !== 'unknown') {
+                  await sock.sendMessage(from, { 
+                    text: "⚠️ Detectamos um problema de sincronização. As mensagens anteriores podem não ter sido recebidas. Por favor, envie uma nova mensagem."
+                  })
+                }
               }
             } catch (cleanupError) {
               console.warn('[wa][cleanup][error]', sessionId, cleanupError)
