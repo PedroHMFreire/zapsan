@@ -48,6 +48,42 @@ async function getUserIdFromSession(sessionId: string): Promise<string | null> {
 const SESS_DIR = process.env.SESS_DIR || path.resolve(process.cwd(), 'sessions')
 
 // 🧹 Helper to clean corrupted sessions with error 515
+// and to handle PreKey errors by clearing problematic keys
+async function clearSessionKeys(sessionId: string, reason: string) {
+  try {
+    const baseDir = path.join(SESS_DIR, sessionId)
+    
+    // Remover arquivos de keys específicos que podem estar corrompidos
+    const keyFilesToRemove = [
+      'pre-key-*.json',
+      'session-*.json', 
+      'sender-key-*.json',
+      'sender-keys-*.json'
+    ]
+    
+    if (fs.existsSync(baseDir)) {
+      const files = fs.readdirSync(baseDir)
+      
+      for (const pattern of keyFilesToRemove) {
+        const regex = new RegExp(pattern.replace('*', '.*'))
+        const matchingFiles = files.filter(file => regex.test(file))
+        
+        for (const file of matchingFiles) {
+          try {
+            fs.unlinkSync(path.join(baseDir, file))
+            console.log(`[wa][cleanup] Removed ${file} from ${sessionId} (${reason})`)
+          } catch (e) {
+            console.warn(`[wa][cleanup] Failed to remove ${file}:`, e)
+          }
+        }
+      }
+    }
+    
+    console.log(`[wa][cleanup] Cleared session keys for ${sessionId} (${reason})`)
+  } catch (error) {
+    console.warn(`[wa][cleanup] Failed to clear session keys for ${sessionId}:`, error)
+  }
+}
 async function cleanCorruptedSession(sessionId: string, baseDir: string): Promise<void> {
   try {
     console.warn(`[wa][cleanup] Limpando sessão corrompida: ${sessionId}`)
@@ -551,6 +587,13 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
 
     sock.ev.on('creds.update', saveCreds)
 
+    // 🔧 FIX: Handler para erros de descriptografia (PreKey/SessionKey) 
+    sock.ev.on('message-receipt.update', async (receipts) => {
+      try { 
+        console.log('[wa][receipt]', sessionId, receipts.length) 
+      } catch {}
+    })
+
     sock.ev.on('connection.update', async (u) => {
       try { console.log('[wa][update]', sessionId, { connection: u.connection, qr: !!u.qr, lastDisconnect: (u as any)?.lastDisconnect?.error?.message }) } catch {}
       if (u.connection) {
@@ -730,6 +773,24 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           const id   = m.key?.id || String(Date.now())
           const from = m.key?.remoteJid || ''
           const fromMe = !!m.key?.fromMe
+          
+          // 🔧 FIX: Verificar se a mensagem foi descriptografada corretamente
+          if (!m.message && !fromMe) {
+            console.warn('[wa][decrypt][failed]', sessionId, {
+              from,
+              id,
+              messageType: (m as any).messageType,
+              reason: 'No message content after decryption'
+            })
+            
+            // Tentar solicitar nova sessão com este contato
+            try {
+              await sock.sendMessage(from, { 
+                text: "⚠️ Problema de sincronização detectado. Por favor, envie uma nova mensagem para restabelecer a conexão."
+              })
+            } catch {}
+            continue
+          }
           
           // Verificar se tem mídia
           const hasMedia = !!(
@@ -932,7 +993,41 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
             }
           }
         } catch(err:any){
-          try { console.warn('[wa][messages.upsert][err]', sessionId, err && (err as any).message) } catch {}
+          // 🔧 FIX: Tratamento específico para erros de descriptografia
+          if (err?.message?.includes('PreKey') || 
+              err?.message?.includes('decrypt') || 
+              err?.name === 'PreKeyError' ||
+              err?.message?.includes('Invalid PreKey ID')) {
+            
+            const from = m?.key?.remoteJid || 'unknown'
+            
+            console.warn('[wa][decrypt][prekey_error]', sessionId, {
+              from,
+              messageId: m?.key?.id,
+              error: err.message,
+              type: err.name
+            })
+            
+            // Limpar keys problemáticas para este contato específico
+            try {
+              await clearSessionKeys(sessionId, `PreKey error with ${from}`)
+              
+              // Tentar enviar mensagem explicativa (se possível)
+              if (from !== 'unknown') {
+                await sock.sendMessage(from, { 
+                  text: "⚠️ Detectamos um problema de sincronização. As mensagens anteriores podem não ter sido recebidas. Por favor, envie uma nova mensagem."
+                })
+              }
+            } catch (cleanupError) {
+              console.warn('[wa][cleanup][error]', sessionId, cleanupError)
+            }
+            
+            // Não quebrar o processamento de outras mensagens
+            continue
+          }
+          
+          // Para outros erros, log normal
+          try { console.warn('[wa][messages.upsert][err]', sessionId, err && err.message) } catch {}
         }
       }
     })
