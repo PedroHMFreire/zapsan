@@ -125,13 +125,13 @@ html, body {
 
 .icon-send::before { content: ''; display: inline-block; width: 18px; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cline x1='22' y1='2' x2='11' y2='13'/%3E%3Cpolygon points='22,2 15,22 11,13 2,9'/%3E%3C/svg%3E") no-repeat center; background-size: contain; }
 
-/* 🔧 FIX: Button improvements with sophisticated styling - icon-only */
+/* 🎨 ENHANCED: Sophisticated button styling - subtle and elegant */
 .m-btn, .icon-btn {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: white;
-  border-radius: 10px;
-  padding: 10px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  padding: 8px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 14px;
@@ -139,38 +139,64 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
-  min-width: 40px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  min-height: 36px;
+  min-width: 36px;
+  position: relative;
+  overflow: hidden;
 }
 
+/* Subtle hover effect - just a gentle highlight */
 .m-btn:hover, .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+  transform: translateY(-0.5px);
 }
 
+/* Active state - even more subtle */
 .m-btn:active, .icon-btn:active {
   transform: translateY(0);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.75);
 }
 
-/* 🔧 FIX: Badge improvements */
+/* Focus state for accessibility */
+.m-btn:focus, .icon-btn:focus {
+  outline: 1px solid rgba(255, 255, 255, 0.2);
+  outline-offset: 1px;
+}
+
+/* 🎨 ENHANCED: Elegant badge styling - subtle and informative */
 .badge {
-  background: rgba(37, 211, 102, 0.15);
+  background: rgba(37, 211, 102, 0.1);
   border: 1px solid rgba(37, 211, 102, 0.3);
   color: #69f0ae;
-  border-radius: 20px;
-  padding: 6px 12px;
-  font-size: 12px;
+  border-radius: 16px;
+  padding: 4px 10px;
+  font-size: 11px;
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 6px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  gap: 4px;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+/* Status-specific badge colors */
+.badge.status-online {
+  border-color: rgba(76, 175, 80, 0.4);
+  color: #81c784;
+}
+
+.badge.status-connecting {
+  background: rgba(255, 193, 7, 0.1);
+  border-color: rgba(255, 193, 7, 0.3);
+  color: #ffcc02;
+}
+
+.badge.status-offline {
+  background: rgba(244, 67, 54, 0.1);
+  border-color: rgba(244, 67, 54, 0.3);
+  color: #f48fb1;
 }
 
 /* 🔧 FIX: Mobile responsive breakpoints */
@@ -185,14 +211,15 @@ html, body {
   }
   
   .m-btn, .icon-btn {
-    padding: 8px 10px;
+    padding: 6px 8px;
     font-size: 13px;
-    min-height: 36px;
+    min-height: 32px;
+    min-width: 32px;
   }
   
   .badge {
-    padding: 4px 8px;
-    font-size: 11px;
+    padding: 3px 8px;
+    font-size: 10px;
   }
 }
 
@@ -208,9 +235,10 @@ html, body {
   }
   
   .m-btn, .icon-btn {
-    padding: 6px 8px;
+    padding: 5px 6px;
     font-size: 12px;
-    min-height: 32px;
+    min-height: 30px;
+    min-width: 30px;
   }
   
   /* Hide text in buttons on very small screens, keep only icons */
