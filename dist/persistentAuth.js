@@ -56,7 +56,6 @@ function deserializeAuthData(data) {
         }
         // TypedArray (generic)
         if (data.type && data.type.endsWith('Array') && Array.isArray(data.data)) {
-            // Try to reconstruct as TypedArray
             try {
                 // eslint-disable-next-line no-eval
                 const TypedArrayCtor = eval(data.type);
@@ -64,10 +63,17 @@ function deserializeAuthData(data) {
             }
             catch { }
         }
-        // Recursively process all object fields
-        const result = {};
-        for (const [key, value] of Object.entries(data)) {
-            result[key] = deserializeAuthData(value);
+        // Recursively process all object fields, but skip prototype pollution
+        const result = Object.create(null);
+        for (const key of Object.keys(data)) {
+            if (key !== 'type' && key !== 'data') {
+                result[key] = deserializeAuthData(data[key]);
+            }
+        }
+        // Preserve type/data for non-typed objects
+        if (data.type && data.data) {
+            result.type = data.type;
+            result.data = data.data;
         }
         return result;
     }
