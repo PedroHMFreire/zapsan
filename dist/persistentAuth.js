@@ -73,10 +73,20 @@ function deserializeAuthData(data) {
 // Salvar credenciais no Supabase
 async function saveAuthToSupabase(sessionId, creds, keys) {
     try {
+        console.log('[auth][save][supabase][attempting]', sessionId, {
+            hasCreds: !!creds,
+            hasKeys: !!keys,
+            credsType: typeof creds,
+            keysType: typeof keys
+        });
         // Serializar dados convertendo Buffers para formato JSON seguro
         const serializedCreds = serializeAuthData(creds);
         const serializedKeys = serializeAuthData(keys);
-        const { error } = await db_1.supa
+        console.log('[auth][save][supabase][serialized]', sessionId, {
+            serializedCredsSize: JSON.stringify(serializedCreds).length,
+            serializedKeysSize: JSON.stringify(serializedKeys).length
+        });
+        const { data, error } = await db_1.supa
             .from('wa_sessions')
             .upsert({
             session_id: sessionId,
@@ -85,12 +95,21 @@ async function saveAuthToSupabase(sessionId, creds, keys) {
             updated_at: new Date().toISOString()
         }, {
             onConflict: 'session_id'
-        });
+        })
+            .select(); // Adicionar select para ver o que foi inserido
         if (error) {
-            console.warn('[auth][save][supabase][error]', sessionId, error.message);
+            console.error('[auth][save][supabase][error]', sessionId, {
+                message: error.message,
+                details: error.details,
+                hint: error.hint,
+                code: error.code
+            });
             return false;
         }
-        console.log('[auth][save][supabase][ok]', sessionId);
+        console.log('[auth][save][supabase][success]', sessionId, {
+            inserted: !!data,
+            rowCount: data?.length || 0
+        });
         return true;
     }
     catch (err) {

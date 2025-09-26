@@ -311,7 +311,13 @@ async function prepareAuthState(baseDir:string, sessionId: string){
           }
         },
         saveCreds: async () => {
+          console.log(`[auth][save] Salvando credenciais existentes para ${sessionId}`)
+          // Atualizar as credenciais
           persistentAuth.state.creds = customAuthState.state.creds
+          
+          // As keys já são atualizadas automaticamente através do método 'set' acima
+          // que chama persistentAuth.saveState() automaticamente
+          
           await persistentAuth.saveState()
         }
       }
