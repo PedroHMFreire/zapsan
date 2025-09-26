@@ -221,18 +221,42 @@ async function prepareAuthState(baseDir:string, sessionId: string){
             get: (type: string, ids: string[]) => {
               const keys = persistentAuth.state.keys || {}
               const result: any = {}
+              
               for (const id of ids) {
-                const key = keys[`${type}:${id}`] || keys[id]
-                if (key) result[id] = key
+                // Formato: type:id (ex: "session:1234567890@s.whatsapp.net")
+                const fullKey = `${type}:${id}`
+                
+                if (keys[fullKey]) {
+                  result[id] = keys[fullKey]
+                } else if (keys[id]) {
+                  // Fallback para keys sem prefixo de tipo
+                  result[id] = keys[id]
+                } else {
+                  // Debug: log keys não encontradas para diagnóstico
+                  console.log(`[auth][keys][missing] ${type}:${id}`)
+                }
               }
+              
               return result
             },
             set: (data: any) => {
               if (!persistentAuth.state.keys) persistentAuth.state.keys = {}
-              Object.assign(persistentAuth.state.keys, data)
+              
+              // Salvar cada key com o prefixo de tipo adequado
+              for (const [key, value] of Object.entries(data)) {
+                persistentAuth.state.keys[key] = value
+              }
+              
+              // Salvar automaticamente quando keys são atualizadas
+              persistentAuth.saveState().catch(err => 
+                console.warn('[auth][keys][save][error]', err.message)
+              )
             },
             clear: () => {
               persistentAuth.state.keys = {}
+              persistentAuth.saveState().catch(err => 
+                console.warn('[auth][keys][clear][error]', err.message)
+              )
             },
             keys: () => {
               return Object.keys(persistentAuth.state.keys || {})

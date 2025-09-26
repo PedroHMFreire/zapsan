@@ -160,19 +160,37 @@ function createPersistentAuthState(sessionId) {
                     this.state.creds = deserializeAuthData(rawCreds);
                     // Carregar keys - formato compatível com Baileys
                     this.state.keys = {};
-                    // Tentar carregar arquivos de key individuais primeiro (formato padrão do Baileys)
-                    const keyFiles = fs_1.default.existsSync(localDir) ?
-                        fs_1.default.readdirSync(localDir).filter(f => f.startsWith('app-state-sync-key-')) : [];
-                    for (const keyFile of keyFiles) {
-                        try {
-                            const keyId = keyFile.replace('app-state-sync-key-', '').replace('.json', '');
-                            const rawKeyData = JSON.parse(fs_1.default.readFileSync(path_1.default.join(localDir, keyFile), 'utf-8'));
-                            const deserializedKey = deserializeAuthData(rawKeyData);
-                            this.state.keys[keyId] = deserializedKey;
+                    // Carregar TODOS os arquivos de key (não só app-state-sync)
+                    if (fs_1.default.existsSync(localDir)) {
+                        const allFiles = fs_1.default.readdirSync(localDir);
+                        // Arquivos de key do Baileys: app-state-sync-key-*, session-*, sender-key-*, pre-key-*
+                        const keyFiles = allFiles.filter(f => f.startsWith('app-state-sync-key-') ||
+                            f.startsWith('session-') ||
+                            f.startsWith('sender-key-') ||
+                            f.startsWith('pre-key-') ||
+                            f.startsWith('sender-keys-') ||
+                            f.startsWith('sessions-'));
+                        for (const keyFile of keyFiles) {
+                            try {
+                                const keyPath = path_1.default.join(localDir, keyFile);
+                                const rawKeyData = JSON.parse(fs_1.default.readFileSync(keyPath, 'utf-8'));
+                                const deserializedKey = deserializeAuthData(rawKeyData);
+                                // Para app-state-sync-key, usar o ID como chave
+                                if (keyFile.startsWith('app-state-sync-key-')) {
+                                    const keyId = keyFile.replace('app-state-sync-key-', '').replace('.json', '');
+                                    this.state.keys[keyId] = deserializedKey;
+                                }
+                                else {
+                                    // Para outros tipos, usar o nome do arquivo sem extensão como chave
+                                    const keyName = keyFile.replace('.json', '');
+                                    this.state.keys[keyName] = deserializedKey;
+                                }
+                            }
+                            catch (err) {
+                                console.warn('[auth][load][key][error]', keyFile, err);
+                            }
                         }
-                        catch (err) {
-                            console.warn('[auth][load][key][error]', keyFile, err);
-                        }
+                        console.log('[auth][load][local][keys]', sessionId, Object.keys(this.state.keys).length, 'keys loaded');
                     }
                     console.log('[auth][load][local][ok]', sessionId);
                     return this.state;
@@ -209,9 +227,20 @@ function createPersistentAuthState(sessionId) {
                 }
                 if (this.state.keys) {
                     // Salvar keys como arquivos separados (padrão Baileys)
-                    Object.entries(this.state.keys).forEach(([keyId, keyData]) => {
+                    Object.entries(this.state.keys).forEach(([keyName, keyData]) => {
                         const serializedKeyData = serializeAuthData(keyData);
-                        fs_1.default.writeFileSync(path_1.default.join(localDir, `app-state-sync-key-${keyId}.json`), JSON.stringify(serializedKeyData, null, 2));
+                        // Determinar o nome do arquivo baseado no tipo de key
+                        let fileName;
+                        if (keyName.includes('app-state-sync-key') || (!keyName.includes('-') && !keyName.includes(':'))) {
+                            // App state sync keys (formato: keyId ou app-state-sync-key-keyId)
+                            const keyId = keyName.replace('app-state-sync-key-', '');
+                            fileName = `app-state-sync-key-${keyId}.json`;
+                        }
+                        else {
+                            // Outros tipos de key (session, sender-key, pre-key)
+                            fileName = `${keyName}.json`;
+                        }
+                        fs_1.default.writeFileSync(path_1.default.join(localDir, fileName), JSON.stringify(serializedKeyData, null, 2));
                     });
                 }
             }
