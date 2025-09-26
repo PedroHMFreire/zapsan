@@ -10,15 +10,64 @@ exports.createPersistentAuthState = createPersistentAuthState;
 const db_1 = require("./db");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+// Função para converter Buffers em objetos serializáveis
+function serializeAuthData(data) {
+    if (Buffer.isBuffer(data)) {
+        return {
+            type: 'Buffer',
+            data: Array.from(data)
+        };
+    }
+    if (data instanceof Uint8Array) {
+        return {
+            type: 'Uint8Array',
+            data: Array.from(data)
+        };
+    }
+    if (Array.isArray(data)) {
+        return data.map(item => serializeAuthData(item));
+    }
+    if (data && typeof data === 'object') {
+        const result = {};
+        for (const [key, value] of Object.entries(data)) {
+            result[key] = serializeAuthData(value);
+        }
+        return result;
+    }
+    return data;
+}
+// Função para converter dados serializados de volta em Buffers
+function deserializeAuthData(data) {
+    if (data && typeof data === 'object') {
+        if (data.type === 'Buffer' && Array.isArray(data.data)) {
+            return Buffer.from(data.data);
+        }
+        if (data.type === 'Uint8Array' && Array.isArray(data.data)) {
+            return new Uint8Array(data.data);
+        }
+        if (Array.isArray(data)) {
+            return data.map(item => deserializeAuthData(item));
+        }
+        const result = {};
+        for (const [key, value] of Object.entries(data)) {
+            result[key] = deserializeAuthData(value);
+        }
+        return result;
+    }
+    return data;
+}
 // Salvar credenciais no Supabase
 async function saveAuthToSupabase(sessionId, creds, keys) {
     try {
+        // Serializar dados convertendo Buffers para formato JSON seguro
+        const serializedCreds = serializeAuthData(creds);
+        const serializedKeys = serializeAuthData(keys);
         const { error } = await db_1.supa
             .from('wa_sessions')
             .upsert({
             session_id: sessionId,
-            creds: JSON.stringify(creds),
-            keys: JSON.stringify(keys),
+            creds: JSON.stringify(serializedCreds),
+            keys: JSON.stringify(serializedKeys),
             updated_at: new Date().toISOString()
         }, {
             onConflict: 'session_id'
@@ -47,8 +96,11 @@ async function loadAuthFromSupabase(sessionId) {
             console.log('[auth][load][supabase][not_found]', sessionId);
             return null;
         }
-        const creds = JSON.parse(data.creds);
-        const keys = JSON.parse(data.keys);
+        // Deserializar dados convertendo Objects de volta para Buffers
+        const rawCreds = JSON.parse(data.creds);
+        const rawKeys = JSON.parse(data.keys);
+        const creds = deserializeAuthData(rawCreds);
+        const keys = deserializeAuthData(rawKeys);
         console.log('[auth][load][supabase][ok]', sessionId);
         return { creds, keys };
     }
