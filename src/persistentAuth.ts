@@ -8,26 +8,23 @@ export interface AuthCredentials {
   keys: any
 }
 
-// Função para converter Buffers em objetos serializáveis
+// Função para converter Buffers/Uint8Arrays para base64
 function serializeAuthData(data: any): any {
   if (Buffer.isBuffer(data)) {
     return {
-      type: 'Buffer',
-      data: Array.from(data)
+      __type: 'Buffer',
+      data: data.toString('base64')
     }
   }
-  
   if (data instanceof Uint8Array) {
     return {
-      type: 'Uint8Array', 
-      data: Array.from(data)
+      __type: 'Uint8Array',
+      data: Buffer.from(data).toString('base64')
     }
   }
-  
   if (Array.isArray(data)) {
     return data.map(item => serializeAuthData(item))
   }
-  
   if (data && typeof data === 'object') {
     const result: any = {}
     for (const [key, value] of Object.entries(data)) {
@@ -35,50 +32,43 @@ function serializeAuthData(data: any): any {
     }
     return result
   }
-  
   return data
 }
 
-// Função para converter dados serializados de volta em Buffers
+// Função para converter dados serializados de volta para Buffers/Uint8Arrays
 function deserializeAuthData(data: any): any {
   if (Array.isArray(data)) {
     return data.map(deserializeAuthData)
   }
+  
   if (data && typeof data === 'object') {
-    // Buffer
-    if (data.type === 'Buffer' && Array.isArray(data.data)) {
-      return Buffer.from(data.data)
-    }
-    // Uint8Array
-    if (data.type === 'Uint8Array' && Array.isArray(data.data)) {
-      return new Uint8Array(data.data)
-    }
-    // DataView
-    if (data.type === 'DataView' && Array.isArray(data.data)) {
-      return new DataView(Uint8Array.from(data.data).buffer)
-    }
-    // TypedArray (generic)
-    if (data.type && data.type.endsWith('Array') && Array.isArray(data.data)) {
+    // Verificar se é um objeto marcado como Buffer/Uint8Array
+    if (data.__type === 'Buffer' && typeof data.data === 'string') {
       try {
-        // eslint-disable-next-line no-eval
-        const TypedArrayCtor = eval(data.type)
-        return new TypedArrayCtor(data.data)
-      } catch {}
-    }
-    // Recursively process all object fields, but skip prototype pollution
-    const result: any = Object.create(null)
-    for (const key of Object.keys(data)) {
-      if (key !== 'type' && key !== 'data') {
-        result[key] = deserializeAuthData(data[key])
+        return Buffer.from(data.data, 'base64')
+      } catch (err) {
+        console.warn('[auth][deserialize] Invalid base64 Buffer:', err)
+        return data
       }
     }
-    // Preserve type/data for non-typed objects
-    if (data.type && data.data) {
-      result.type = data.type
-      result.data = data.data
+    
+    if (data.__type === 'Uint8Array' && typeof data.data === 'string') {
+      try {
+        return new Uint8Array(Buffer.from(data.data, 'base64'))
+      } catch (err) {
+        console.warn('[auth][deserialize] Invalid base64 Uint8Array:', err)
+        return data
+      }
+    }
+    
+    // Processar recursivamente outros objetos
+    const result: any = {}
+    for (const [key, value] of Object.entries(data)) {
+      result[key] = deserializeAuthData(value)
     }
     return result
   }
+  
   return data
 }
 
@@ -178,17 +168,19 @@ export function createPersistentAuthState(sessionId: string) {
       try {
         if (fs.existsSync(path.join(localDir, 'creds.json'))) {
           const credsPath = path.join(localDir, 'creds.json')
-          const keysPath = path.join(localDir, 'app-state-sync-key-*.json')
           
-          this.state.creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'))
+          // Carregar e deserializar credenciais
+          const rawCreds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'))
+          this.state.creds = deserializeAuthData(rawCreds)
           
           // Carregar keys (podem ser múltiplos arquivos)
           const keyFiles = fs.readdirSync(localDir).filter(f => f.startsWith('app-state-sync-key-'))
           this.state.keys = {}
           
           for (const keyFile of keyFiles) {
-            const keyData = JSON.parse(fs.readFileSync(path.join(localDir, keyFile), 'utf-8'))
-            Object.assign(this.state.keys, keyData)
+            const rawKeyData = JSON.parse(fs.readFileSync(path.join(localDir, keyFile), 'utf-8'))
+            const deserializedKeys = deserializeAuthData(rawKeyData)
+            Object.assign(this.state.keys, deserializedKeys)
           }
           
           console.log('[auth][load][local][ok]', sessionId)
@@ -227,18 +219,21 @@ export function createPersistentAuthState(sessionId: string) {
         fs.mkdirSync(localDir, { recursive: true })
         
         if (this.state.creds) {
+          // Serializar credenciais antes de salvar
+          const serializedCreds = serializeAuthData(this.state.creds)
           fs.writeFileSync(
             path.join(localDir, 'creds.json'), 
-            JSON.stringify(this.state.creds, null, 2)
+            JSON.stringify(serializedCreds, null, 2)
           )
         }
         
         if (this.state.keys) {
           // Salvar keys como arquivos separados (padrão Baileys)
           Object.entries(this.state.keys).forEach(([keyId, keyData]) => {
+            const serializedKeyData = serializeAuthData(keyData)
             fs.writeFileSync(
               path.join(localDir, `app-state-sync-key-${keyId}.json`),
-              JSON.stringify(keyData, null, 2)
+              JSON.stringify(serializedKeyData, null, 2)
             )
           })
         }
