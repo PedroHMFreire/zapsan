@@ -117,14 +117,15 @@ async function cleanCorruptedSession(sessionId, baseDir) {
         catch (err) {
             console.warn(`[wa][cleanup] Erro ao atualizar DB: ${err}`);
         }
-        // 4. Clear any auth cache
+        // 4. Clear WhatsApp credentials from wa_sessions table
         try {
-            await db_1.supa.from('session_auth')
-                .delete()
-                .eq('session_id', sessionId);
+            const deleted = await (0, persistentAuth_1.deleteAuthFromSupabase)(sessionId);
+            if (deleted) {
+                console.log(`[wa][cleanup] Credenciais removidas do Supabase para: ${sessionId}`);
+            }
         }
         catch (err) {
-            console.warn(`[wa][cleanup] Erro ao limpar auth: ${err}`);
+            console.warn(`[wa][cleanup] Erro ao limpar credenciais: ${err}`);
         }
         console.log(`[wa][cleanup] Sessão ${sessionId} completamente limpa`);
     }
@@ -573,6 +574,16 @@ async function createOrLoadSession(sessionId) {
                 const isStreamErrored = code === 515 || u.lastDisconnect?.error?.message?.includes('Stream Errored');
                 const isLoggedOut = code === 401 ||
                     u.lastDisconnect?.error?.output?.statusCode === baileys_1.DisconnectReason.loggedOut;
+                // Log detalhado para diagnóstico de loggedOut
+                if (isLoggedOut) {
+                    console.warn(`[wa][loggedOut] WhatsApp rejeitou autenticação para ${sessionId}:`, {
+                        code,
+                        statusCode: u.lastDisconnect?.error?.output?.statusCode,
+                        disconnectReason: baileys_1.DisconnectReason.loggedOut,
+                        errorMessage: u.lastDisconnect?.error?.message,
+                        everOpened: sess.everOpened
+                    });
+                }
                 // >>> Correção 2: em 515/401, resetar credenciais e re-parear
                 if (!sess.manualMode && (isStreamErrored || isLoggedOut)) {
                     const crit = (sess.criticalCount || 0) + 1;
@@ -584,16 +595,25 @@ async function createOrLoadSession(sessionId) {
                     // Heurística: se NUNCA abriu (sem everOpened) e já deu 2x 515 -> nuke para forçar QR totalmente novo
                     const neverOpened = !sess.everOpened;
                     const shouldNuke = isLoggedOut || crit >= 3 || (neverOpened && crit >= 2) || crit > 6;
-                    console.warn('[wa][disconnect-critical]', sessionId, { code, crit, delay, everOpened: !!sess.everOpened, willNuke: shouldNuke });
+                    console.warn('[wa][disconnect-critical]', sessionId, {
+                        code,
+                        crit,
+                        delay,
+                        everOpened: !!sess.everOpened,
+                        willNuke: shouldNuke,
+                        isStreamErrored,
+                        isLoggedOut,
+                        reason: isLoggedOut ? 'LOGGED_OUT' : isStreamErrored ? 'STREAM_ERROR' : 'OTHER'
+                    });
                     if (shouldNuke) {
-                        // Use the new cleanup function for better error 515 handling
+                        // Use the new cleanup function for better error 515 handling and loggedOut
                         await cleanCorruptedSession(sessionId, baseDir);
                         // Create fresh session entry
                         sessions.set(sessionId, {
                             baseDir,
                             starting: false,
                             qr: null,
-                            lastState: 'need-qr',
+                            lastState: isLoggedOut ? 'logged-out' : 'need-qr',
                             qrDataUrl: null,
                             restartCount: 0,
                             criticalCount: 0,
@@ -602,8 +622,9 @@ async function createOrLoadSession(sessionId) {
                             everOpened: false,
                             lastOpenAt: undefined
                         });
-                        // Wait before attempting reconnection
-                        setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), delay);
+                        // Wait before attempting reconnection - longer delay for loggedOut
+                        const reconnectDelay = isLoggedOut ? delay * 2 : delay;
+                        setTimeout(() => createOrLoadSession(sessionId).catch(() => { }), reconnectDelay);
                         return;
                     }
                     const restartCount = (sess.restartCount || 0) + 1;

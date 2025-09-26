@@ -23,7 +23,7 @@ import http from 'http'
 import https from 'https'
 import { EventEmitter } from 'events'
 import { processMedia, MediaInfo } from './mediaProcessor'
-import { createPersistentAuthState, saveAuthToSupabase } from './persistentAuth'
+import { createPersistentAuthState, saveAuthToSupabase, deleteAuthFromSupabase } from './persistentAuth'
 import { reply } from './ai'
 
 // 📊 Helper to get userId from sessionId
@@ -74,13 +74,14 @@ async function cleanCorruptedSession(sessionId: string, baseDir: string): Promis
       console.warn(`[wa][cleanup] Erro ao atualizar DB: ${err}`)
     }
     
-    // 4. Clear any auth cache
+    // 4. Clear WhatsApp credentials from wa_sessions table
     try {
-      await supa.from('session_auth')
-        .delete()
-        .eq('session_id', sessionId)
+      const deleted = await deleteAuthFromSupabase(sessionId)
+      if (deleted) {
+        console.log(`[wa][cleanup] Credenciais removidas do Supabase para: ${sessionId}`)
+      }
     } catch (err) {
-      console.warn(`[wa][cleanup] Erro ao limpar auth: ${err}`)
+      console.warn(`[wa][cleanup] Erro ao limpar credenciais: ${err}`)
     }
     
     console.log(`[wa][cleanup] Sessão ${sessionId} completamente limpa`)
@@ -554,6 +555,17 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           code === 401 ||
           (u.lastDisconnect?.error as any)?.output?.statusCode === DisconnectReason.loggedOut
 
+        // Log detalhado para diagnóstico de loggedOut
+        if (isLoggedOut) {
+          console.warn(`[wa][loggedOut] WhatsApp rejeitou autenticação para ${sessionId}:`, {
+            code,
+            statusCode: (u.lastDisconnect?.error as any)?.output?.statusCode,
+            disconnectReason: DisconnectReason.loggedOut,
+            errorMessage: (u.lastDisconnect?.error as any)?.message,
+            everOpened: sess.everOpened
+          })
+        }
+
         // >>> Correção 2: em 515/401, resetar credenciais e re-parear
         if (!sess.manualMode && (isStreamErrored || isLoggedOut)) {
           const crit = (sess.criticalCount||0)+1
@@ -565,10 +577,20 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
           // Heurística: se NUNCA abriu (sem everOpened) e já deu 2x 515 -> nuke para forçar QR totalmente novo
           const neverOpened = !sess.everOpened
           const shouldNuke = isLoggedOut || crit >= 3 || (neverOpened && crit >=2) || crit > 6
-          console.warn('[wa][disconnect-critical]', sessionId, { code, crit, delay, everOpened: !!sess.everOpened, willNuke: shouldNuke })
+          
+          console.warn('[wa][disconnect-critical]', sessionId, { 
+            code, 
+            crit, 
+            delay, 
+            everOpened: !!sess.everOpened, 
+            willNuke: shouldNuke,
+            isStreamErrored,
+            isLoggedOut,
+            reason: isLoggedOut ? 'LOGGED_OUT' : isStreamErrored ? 'STREAM_ERROR' : 'OTHER'
+          })
           
           if (shouldNuke) {
-            // Use the new cleanup function for better error 515 handling
+            // Use the new cleanup function for better error 515 handling and loggedOut
             await cleanCorruptedSession(sessionId, baseDir)
             
             // Create fresh session entry
@@ -576,7 +598,7 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
               baseDir, 
               starting: false, 
               qr: null, 
-              lastState: 'need-qr', 
+              lastState: isLoggedOut ? 'logged-out' : 'need-qr', 
               qrDataUrl: null, 
               restartCount: 0, 
               criticalCount: 0, 
@@ -586,8 +608,9 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
               lastOpenAt: undefined
             })
             
-            // Wait before attempting reconnection
-            setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), delay)
+            // Wait before attempting reconnection - longer delay for loggedOut
+            const reconnectDelay = isLoggedOut ? delay * 2 : delay
+            setTimeout(() => createOrLoadSession(sessionId).catch(() => {}), reconnectDelay)
             return
           }
           
