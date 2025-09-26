@@ -92,6 +92,20 @@ async function getUserIdFromSession(sessionId) {
 // Mantém comportamento antigo: pasta local "sessions".
 // Em produção (ex.: Render) recomenda-se definir SESS_DIR para um caminho gravável/persistente (/data/sessions ou volume montado)
 const SESS_DIR = process.env.SESS_DIR || path_1.default.resolve(process.cwd(), 'sessions');
+// Cache para evitar spam de mensagens de sincronização
+const syncErrorMessageSent = new Map();
+const SYNC_ERROR_THROTTLE_MS = 60000; // 1 minuto entre mensagens por contato
+// Helper para evitar spam de mensagens de sincronização
+function canSendSyncErrorMessage(from) {
+    const key = `sync_error_${from}`;
+    const lastSent = syncErrorMessageSent.get(key) || 0;
+    const now = Date.now();
+    if (now - lastSent < SYNC_ERROR_THROTTLE_MS) {
+        return false; // Ainda dentro do período de throttle
+    }
+    syncErrorMessageSent.set(key, now);
+    return true;
+}
 // 🧹 Helper to clean corrupted sessions with error 515
 // and to handle PreKey errors by clearing problematic keys
 async function clearSessionKeys(sessionId, reason) {
@@ -810,11 +824,17 @@ async function createOrLoadSession(sessionId) {
                             messageType: m.messageType,
                             reason: 'No message content after decryption'
                         });
-                        // Tentar solicitar nova sessão com este contato
+                        // Tentar solicitar nova sessão com este contato (com throttling)
                         try {
-                            await sock.sendMessage(from, {
-                                text: "⚠️ Problema de sincronização detectado. Por favor, envie uma nova mensagem para restabelecer a conexão."
-                            });
+                            if (canSendSyncErrorMessage(from)) {
+                                await sock.sendMessage(from, {
+                                    text: "⚠️ Problema de sincronização detectado. Por favor, envie uma nova mensagem para restabelecer a conexão."
+                                });
+                                console.log(`[wa][sync_error] Mensagem enviada para ${from} (falha descriptografia)`);
+                            }
+                            else {
+                                console.log(`[wa][sync_error] Throttled - mensagem não enviada para ${from}`);
+                            }
                         }
                         catch { }
                         continue;
@@ -1039,10 +1059,16 @@ async function createOrLoadSession(sessionId) {
                         // Para SessionError "No session record", tentar reestabelecer apenas com este contato
                         try {
                             if (err?.message?.includes('No session record') && from !== 'unknown') {
-                                // Enviar mensagem solicitando nova mensagem para reestabelecer chaves
-                                await sock.sendMessage(from, {
-                                    text: "⚠️ Problema de sincronização detectado. Por favor, envie uma nova mensagem para restabelecer a conexão."
-                                });
+                                // Enviar mensagem solicitando nova mensagem para reestabelecer chaves (com throttling)
+                                if (canSendSyncErrorMessage(from)) {
+                                    await sock.sendMessage(from, {
+                                        text: "⚠️ Problema de sincronização detectado. Por favor, envie uma nova mensagem para restabelecer a conexão."
+                                    });
+                                    console.log(`[wa][sync_error] Mensagem enviada para ${from} (SessionError)`);
+                                }
+                                else {
+                                    console.log(`[wa][sync_error] Throttled - mensagem não enviada para ${from}`);
+                                }
                                 console.log(`[wa][decrypt] Solicitando reestabelecimento de chaves com ${from}`);
                                 // Tentar solicitar nova sessão E2E com este contato específico
                                 try {
