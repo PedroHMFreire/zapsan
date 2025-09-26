@@ -1,7 +1,7 @@
 {
-  "name": "ZapSan - WhatsApp Business Assistant",
+  "name": "ZapSan ⚡ WhatsApp Business Assistant",
   "short_name": "ZapSan",
-  "description": "Assistente inteligente para WhatsApp Business com IA integrada",
+  "description": "Assistente inteligente para WhatsApp Business com IA integrada - Comunicação rápida e automatizada",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -12,6 +12,18 @@
   "scope": "/",
   
   "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
     {
       "src": "/icons/icon-72x72.png",
       "sizes": "72x72",

@@ -58,8 +58,11 @@ html, body {
 
 /* Brand com ícone - ícone à esquerda do texto */
 .brand.icon-whatsapp {
-  padding-left: 28px; /* espaço para o ícone */
+  padding-left: 32px; /* espaço para o ícone maior */
   position: relative;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 /* 🔧 FIX: Top sections positioning */
@@ -80,17 +83,18 @@ html, body {
   margin-left: auto;
 }
 
-/* 🎨 ENHANCED: Sophisticated icons (SVG-based, no color) */
+/* 🎨 ENHANCED: ZapSan Brand with sophisticated lightning bolt icon */
 .icon-whatsapp::before { 
   content: ''; 
   position: absolute;
-  left: 8px;
+  left: 6px;
   top: 50%;
   transform: translateY(-50%);
-  width: 20px; 
-  height: 20px; 
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z'/%3E%3C/svg%3E") no-repeat center; 
-  background-size: contain; 
+  width: 22px; 
+  height: 22px; 
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cdefs%3E%3ClinearGradient id='lightning' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%2325D366'/%3E%3Cstop offset='100%25' stop-color='%23128C7E'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M13 2L3 14h9l-1 8 10-12h-9l1-8z' fill='url(%23lightning)' stroke='%23ffffff' stroke-width='0.5' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center; 
+  background-size: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
 }
 
 /* Botões apenas com ícones */
