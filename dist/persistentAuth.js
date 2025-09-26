@@ -38,16 +38,33 @@ function serializeAuthData(data) {
 }
 // Função para converter dados serializados de volta em Buffers
 function deserializeAuthData(data) {
+    if (Array.isArray(data)) {
+        return data.map(deserializeAuthData);
+    }
     if (data && typeof data === 'object') {
+        // Buffer
         if (data.type === 'Buffer' && Array.isArray(data.data)) {
             return Buffer.from(data.data);
         }
+        // Uint8Array
         if (data.type === 'Uint8Array' && Array.isArray(data.data)) {
             return new Uint8Array(data.data);
         }
-        if (Array.isArray(data)) {
-            return data.map(item => deserializeAuthData(item));
+        // DataView
+        if (data.type === 'DataView' && Array.isArray(data.data)) {
+            return new DataView(Uint8Array.from(data.data).buffer);
         }
+        // TypedArray (generic)
+        if (data.type && data.type.endsWith('Array') && Array.isArray(data.data)) {
+            // Try to reconstruct as TypedArray
+            try {
+                // eslint-disable-next-line no-eval
+                const TypedArrayCtor = eval(data.type);
+                return new TypedArrayCtor(data.data);
+            }
+            catch { }
+        }
+        // Recursively process all object fields
         const result = {};
         for (const [key, value] of Object.entries(data)) {
             result[key] = deserializeAuthData(value);
