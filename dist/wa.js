@@ -572,9 +572,10 @@ async function createOrLoadSession(sessionId) {
         const sess = sessions.get(sessionId);
         // Usa wrapper resiliente para reduzir risco de ENOENT inicial (principalmente em FS em rede ou após nukeDir simultâneo)
         const { state, saveCreds } = await prepareAuthState(baseDir, sessionId);
-        // Verificar se as credenciais são válidas antes de tentar conectar
-        if (state.creds && !state.creds.me) {
-            console.warn(`[wa][start] Credenciais inválidas para ${sessionId}, limpando para nova autenticação`);
+        // Verificar se as credenciais são válidas APENAS para sessões que já foram autenticadas antes
+        // Para sessões novas, state.creds.me só existirá APÓS o usuário escanear o QR
+        if (state.creds && state.creds.me && !state.creds.me.id) {
+            console.warn(`[wa][start] Credenciais corrompidas para ${sessionId}, limpando para nova autenticação`);
             await cleanCorruptedSession(sessionId, baseDir);
             // Recriar auth state limpo
             const freshAuth = await prepareAuthState(baseDir, sessionId);
