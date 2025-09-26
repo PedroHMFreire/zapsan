@@ -595,7 +595,7 @@ async function createOrLoadSession(sessionId) {
         if (manualStartRequests.has(sessionId))
             manualStartRequests.delete(sessionId);
         sess.starting = false;
-        sess.qr = null;
+        // Não definir sess.qr = null aqui - deixar que o evento QR defina quando disponível
         if (!sess.messages)
             sess.messages = [];
         sock.ev.on('creds.update', saveCreds);
@@ -1161,8 +1161,11 @@ function getQR(sessionId) {
     // Enquanto estiver em processos de conexão/reconexão, devolver último QR disponível
     if (!s)
         return null;
+    // Verificar tanto qr quanto qrDataUrl (redundância para garantir)
     if (s.qr)
         return s.qr;
+    if (s.qrDataUrl)
+        return s.qrDataUrl;
     return null;
 }
 // === API ORIGINAL ===
