@@ -48,6 +48,29 @@
     const statusEl = document.getElementById('status');
     const note = document.getElementById('status-note');
 
+    // Garantir que a sessão existe antes de tentar obter o QR
+    async function ensureSessionExists() {
+      if (!id) return false;
+      try {
+        statusEl.textContent = 'Iniciando sessão...';
+        const response = await fetch('/sessions/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: id })
+        });
+        if (response.ok) {
+          statusEl.textContent = 'Gerando QR...';
+          return true;
+        } else {
+          statusEl.textContent = 'Erro ao criar sessão';
+          return false;
+        }
+      } catch (error) {
+        statusEl.textContent = 'Erro de rede ao criar sessão';
+        return false;
+      }
+    }
+
     let lastQRChangeAt = 0;
     async function pollQR() {
       if (!id) return;
@@ -112,10 +135,24 @@
       } catch { toast('Erro rede reset','err'); }
     });
 
-  setInterval(pollQR, 3000);
-    setInterval(pollStatus, 2000);
-    pollQR();
-    pollStatus();
+    // Inicializar: criar sessão e depois começar polling
+    async function init() {
+      if (!id) {
+        statusEl.textContent = 'ID de sessão não encontrado';
+        return;
+      }
+      
+      const sessionCreated = await ensureSessionExists();
+      if (sessionCreated) {
+        setInterval(pollQR, 3000);
+        setInterval(pollStatus, 2000);
+        pollQR();
+        pollStatus();
+      }
+    }
+
+    // Inicializar quando a página carrega
+    init();
   </script>
 </body>
 </html>
