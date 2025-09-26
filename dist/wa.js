@@ -117,12 +117,11 @@ async function clearSessionKeys(sessionId, reason) {
             // Não remover nada, deixar o WhatsApp reestabelecer naturalmente
             return;
         }
-        // Para PreKey errors mais críticos, remover arquivos específicos
+        // Para PreKey errors críticos, remover apenas pre-keys corrompidas (manter sessions)
         const keyFilesToRemove = [
-            'pre-key-*.json',
-            'session-*.json',
-            'sender-key-*.json',
-            'sender-keys-*.json'
+            'pre-key-*.json' // Só remover pre-keys, manter session-* e sender-* 
+            // session-*.json mantidas - podem ser reutilizadas
+            // sender-key-*.json mantidas - específicas por contato
         ];
         if (fs_1.default.existsSync(baseDir)) {
             const files = fs_1.default.readdirSync(baseDir);
@@ -150,14 +149,54 @@ async function clearSessionKeys(sessionId, reason) {
 }
 async function cleanCorruptedSession(sessionId, baseDir) {
     try {
-        console.warn(`[wa][cleanup] Limpando sessão corrompida: ${sessionId}`);
-        // 1. Remove filesystem data
+        console.warn(`[wa][cleanup] Limpeza seletiva de sessão: ${sessionId}`);
+        // 1. Remove filesystem data de forma seletiva (preservar algumas chaves úteis)
         try {
+            // Primeiro, tentar preservar arquivos úteis fazendo backup
+            const backupDir = path_1.default.join(baseDir, '.backup');
+            const preserveFiles = ['session-*.json', 'sender-key-*.json', 'app-state-sync-key-*.json'];
+            if (fs_1.default.existsSync(baseDir)) {
+                fs_1.default.mkdirSync(backupDir, { recursive: true });
+                const files = fs_1.default.readdirSync(baseDir);
+                // Fazer backup de arquivos importantes antes de limpar
+                for (const file of files) {
+                    const shouldPreserve = preserveFiles.some(pattern => {
+                        const regex = new RegExp(pattern.replace('*', '.*'));
+                        return regex.test(file);
+                    });
+                    if (shouldPreserve) {
+                        try {
+                            fs_1.default.copyFileSync(path_1.default.join(baseDir, file), path_1.default.join(backupDir, file));
+                            console.log(`[wa][cleanup] Backup preservado: ${file}`);
+                        }
+                        catch { }
+                    }
+                }
+            }
+            // Agora limpar diretório principal
             nukeDir(baseDir);
-            console.log(`[wa][cleanup] Diretório removido: ${baseDir}`);
+            // Restaurar arquivos preservados
+            if (fs_1.default.existsSync(backupDir)) {
+                fs_1.default.mkdirSync(baseDir, { recursive: true });
+                const backupFiles = fs_1.default.readdirSync(backupDir);
+                for (const file of backupFiles) {
+                    try {
+                        fs_1.default.copyFileSync(path_1.default.join(backupDir, file), path_1.default.join(baseDir, file));
+                    }
+                    catch { }
+                }
+                // Limpar backup
+                nukeDir(backupDir);
+            }
+            console.log(`[wa][cleanup] Limpeza seletiva concluída: ${baseDir}`);
         }
         catch (err) {
-            console.warn(`[wa][cleanup] Erro ao remover diretório: ${err}`);
+            console.warn(`[wa][cleanup] Erro na limpeza seletiva, usando limpeza total: ${err}`);
+            // Fallback para limpeza total se backup falhar
+            try {
+                nukeDir(baseDir);
+            }
+            catch { }
         }
         // 2. Clean from memory
         sessions.delete(sessionId);
@@ -329,12 +368,20 @@ async function prepareAuthState(baseDir, sessionId) {
                         set: (data) => {
                             if (!persistentAuth.state.keys)
                                 persistentAuth.state.keys = {};
-                            // Salvar cada key com o prefixo de tipo adequado
+                            // Salvar cada key com metadados adicionais para melhor rastreamento
                             for (const [key, value] of Object.entries(data)) {
                                 persistentAuth.state.keys[key] = value;
+                                // Log detalhado para debug de keys
+                                console.log(`[auth][keys][set] ${key}: ${typeof value} (size: ${JSON.stringify(value).length})`);
                             }
-                            // Salvar automaticamente quando keys são atualizadas
-                            persistentAuth.saveState().catch(err => console.warn('[auth][keys][save][error]', err.message));
+                            // Salvar automaticamente quando keys são atualizadas com retry
+                            persistentAuth.saveState().catch(err => {
+                                console.warn('[auth][keys][save][error]', err.message);
+                                // Retry uma vez após 1 segundo
+                                setTimeout(() => {
+                                    persistentAuth.saveState().catch(retryErr => console.error('[auth][keys][save][retry_failed]', retryErr.message));
+                                }, 1000);
+                            });
                         },
                         clear: () => {
                             persistentAuth.state.keys = {};

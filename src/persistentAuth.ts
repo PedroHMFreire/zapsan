@@ -242,21 +242,57 @@ export function createPersistentAuthState(sessionId: string) {
         console.warn('[auth][load][local][error]', sessionId, err)
       }
       
-      // Se não existe local, tentar Supabase
+      // Se não existe local, tentar Supabase com retry
       console.log('[auth][load][supabase][trying]', sessionId)
-      const supabaseAuth = await loadAuthFromSupabase(sessionId)
+      
+      let supabaseAuth = null
+      let attempts = 0
+      const maxAttempts = 3
+      
+      while (attempts < maxAttempts && !supabaseAuth) {
+        attempts++
+        try {
+          supabaseAuth = await loadAuthFromSupabase(sessionId)
+          if (supabaseAuth) break
+        } catch (err) {
+          console.warn(`[auth][load][supabase][attempt_${attempts}]`, sessionId, err)
+          if (attempts < maxAttempts) {
+            // Aguardar antes do retry
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempts))
+          }
+        }
+      }
+      
       if (supabaseAuth) {
+        console.log('[auth][load][supabase][ok]', sessionId, 'credenciais recuperadas do Supabase')
+        
         this.state.creds = supabaseAuth.creds
         this.state.keys = supabaseAuth.keys || {}
         
-        console.log('[auth][load][supabase][ok]', sessionId, 'credenciais recuperadas do Supabase')
+        // Validar integridade dos dados recuperados
+        const credsValid = supabaseAuth.creds && typeof supabaseAuth.creds === 'object'
+        const keysValid = supabaseAuth.keys && typeof supabaseAuth.keys === 'object'
         
-        // Salvar localmente para próximas vezes
-        this.saveToLocal()
+        if (!credsValid || !keysValid) {
+          console.warn('[auth][load][supabase][invalid_data]', sessionId, {
+            credsValid,
+            keysValid,
+            credsType: typeof supabaseAuth.creds,
+            keysType: typeof supabaseAuth.keys
+          })
+          // Continuar mesmo com dados inválidos, mas registrar o problema
+        }
+        
+        // Salvar localmente para próximas vezes com validação
+        try {
+          this.saveToLocal()
+        } catch (saveErr) {
+          console.warn('[auth][load][supabase][save_local_failed]', sessionId, saveErr)
+        }
         
         return this.state
       } else {
-        console.log('[auth][load][supabase][not_found]', sessionId)
+        console.log('[auth][load][supabase][not_found]', sessionId, `após ${attempts} tentativas`)
       }
       
       // Retornar estado vazio para nova sessão
@@ -265,11 +301,49 @@ export function createPersistentAuthState(sessionId: string) {
     },
     
     async saveState() {
-      // Salvar localmente
-      this.saveToLocal()
+      // Validar dados antes de salvar
+      if (!this.state.creds && !this.state.keys) {
+        console.warn('[auth][save][empty_state]', sessionId, 'nenhuma credencial para salvar')
+        return
+      }
       
-      // Backup no Supabase
-      await saveAuthToSupabase(sessionId, this.state.creds, this.state.keys)
+      console.log('[auth][save][starting]', sessionId, {
+        hasCreds: !!this.state.creds,
+        hasKeys: !!this.state.keys,
+        keysCount: this.state.keys ? Object.keys(this.state.keys).length : 0
+      })
+      
+      // Salvar localmente primeiro (mais rápido e confiável)
+      try {
+        this.saveToLocal()
+      } catch (localErr) {
+        console.error('[auth][save][local][error]', sessionId, localErr)
+      }
+      
+      // Backup no Supabase com retry
+      let saved = false
+      let attempts = 0
+      const maxAttempts = 3
+      
+      while (!saved && attempts < maxAttempts) {
+        attempts++
+        try {
+          saved = await saveAuthToSupabase(sessionId, this.state.creds, this.state.keys)
+          if (saved) {
+            console.log('[auth][save][complete]', sessionId, `local + supabase (attempt ${attempts})`)
+            break
+          }
+        } catch (err) {
+          console.error(`[auth][save][supabase][attempt_${attempts}]`, sessionId, err)
+          if (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempts))
+          }
+        }
+      }
+      
+      if (!saved) {
+        console.error('[auth][save][supabase][failed]', sessionId, `após ${attempts} tentativas`)
+      }
     },
     
     saveToLocal() {

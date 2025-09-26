@@ -78,12 +78,11 @@ async function clearSessionKeys(sessionId: string, reason: string) {
       return
     }
     
-    // Para PreKey errors mais críticos, remover arquivos específicos
+    // Para PreKey errors críticos, remover apenas pre-keys corrompidas (manter sessions)
     const keyFilesToRemove = [
-      'pre-key-*.json',
-      'session-*.json', 
-      'sender-key-*.json',
-      'sender-keys-*.json'
+      'pre-key-*.json'  // Só remover pre-keys, manter session-* e sender-* 
+      // session-*.json mantidas - podem ser reutilizadas
+      // sender-key-*.json mantidas - específicas por contato
     ]
     
     if (fs.existsSync(baseDir)) {
@@ -113,14 +112,55 @@ async function clearSessionKeys(sessionId: string, reason: string) {
 }
 async function cleanCorruptedSession(sessionId: string, baseDir: string): Promise<void> {
   try {
-    console.warn(`[wa][cleanup] Limpando sessão corrompida: ${sessionId}`)
+    console.warn(`[wa][cleanup] Limpeza seletiva de sessão: ${sessionId}`)
     
-    // 1. Remove filesystem data
+    // 1. Remove filesystem data de forma seletiva (preservar algumas chaves úteis)
     try {
+      // Primeiro, tentar preservar arquivos úteis fazendo backup
+      const backupDir = path.join(baseDir, '.backup')
+      const preserveFiles = ['session-*.json', 'sender-key-*.json', 'app-state-sync-key-*.json']
+      
+      if (fs.existsSync(baseDir)) {
+        fs.mkdirSync(backupDir, { recursive: true })
+        const files = fs.readdirSync(baseDir)
+        
+        // Fazer backup de arquivos importantes antes de limpar
+        for (const file of files) {
+          const shouldPreserve = preserveFiles.some(pattern => {
+            const regex = new RegExp(pattern.replace('*', '.*'))
+            return regex.test(file)
+          })
+          
+          if (shouldPreserve) {
+            try {
+              fs.copyFileSync(path.join(baseDir, file), path.join(backupDir, file))
+              console.log(`[wa][cleanup] Backup preservado: ${file}`)
+            } catch {}
+          }
+        }
+      }
+      
+      // Agora limpar diretório principal
       nukeDir(baseDir)
-      console.log(`[wa][cleanup] Diretório removido: ${baseDir}`)
+      
+      // Restaurar arquivos preservados
+      if (fs.existsSync(backupDir)) {
+        fs.mkdirSync(baseDir, { recursive: true })
+        const backupFiles = fs.readdirSync(backupDir)
+        for (const file of backupFiles) {
+          try {
+            fs.copyFileSync(path.join(backupDir, file), path.join(baseDir, file))
+          } catch {}
+        }
+        // Limpar backup
+        nukeDir(backupDir)
+      }
+      
+      console.log(`[wa][cleanup] Limpeza seletiva concluída: ${baseDir}`)
     } catch (err) {
-      console.warn(`[wa][cleanup] Erro ao remover diretório: ${err}`)
+      console.warn(`[wa][cleanup] Erro na limpeza seletiva, usando limpeza total: ${err}`)
+      // Fallback para limpeza total se backup falhar
+      try { nukeDir(baseDir) } catch {}
     }
     
     // 2. Clean from memory
@@ -307,15 +347,24 @@ async function prepareAuthState(baseDir:string, sessionId: string){
             set: (data: any) => {
               if (!persistentAuth.state.keys) persistentAuth.state.keys = {}
               
-              // Salvar cada key com o prefixo de tipo adequado
+              // Salvar cada key com metadados adicionais para melhor rastreamento
               for (const [key, value] of Object.entries(data)) {
                 persistentAuth.state.keys[key] = value
+                
+                // Log detalhado para debug de keys
+                console.log(`[auth][keys][set] ${key}: ${typeof value} (size: ${JSON.stringify(value).length})`)
               }
               
-              // Salvar automaticamente quando keys são atualizadas
-              persistentAuth.saveState().catch(err => 
+              // Salvar automaticamente quando keys são atualizadas com retry
+              persistentAuth.saveState().catch(err => {
                 console.warn('[auth][keys][save][error]', err.message)
-              )
+                // Retry uma vez após 1 segundo
+                setTimeout(() => {
+                  persistentAuth.saveState().catch(retryErr => 
+                    console.error('[auth][keys][save][retry_failed]', retryErr.message)
+                  )
+                }, 1000)
+              })
             },
             clear: () => {
               persistentAuth.state.keys = {}
