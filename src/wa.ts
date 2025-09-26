@@ -194,33 +194,58 @@ async function prepareAuthState(baseDir:string, sessionId: string){
       const persistentAuth = createPersistentAuthState(sessionId)
       await persistentAuth.loadState()
       
-      // Converter para formato esperado pelo Baileys
-      const authState = {
+      // Se não tem credenciais, usar useMultiFileAuthState padrão
+      if (!persistentAuth.state.creds) {
+        const standardAuth = await useMultiFileAuthState(baseDir)
+        
+        // Criar auth state que combina ambos os sistemas
+        const authState = {
+          state: standardAuth.state,
+          saveCreds: async () => {
+            await standardAuth.saveCreds()
+            // Também salvar no Supabase
+            persistentAuth.state.creds = standardAuth.state.creds
+            persistentAuth.state.keys = standardAuth.state.keys
+            await persistentAuth.saveState()
+          }
+        }
+        
+        return authState
+      }
+      
+      // Criar uma implementação customizada que funciona como o padrão do Baileys
+      const customAuthState = {
         state: {
           creds: persistentAuth.state.creds,
-          keys: persistentAuth.state.keys
+          keys: {
+            get: (type: string, ids: string[]) => {
+              const keys = persistentAuth.state.keys || {}
+              const result: any = {}
+              for (const id of ids) {
+                const key = keys[`${type}:${id}`] || keys[id]
+                if (key) result[id] = key
+              }
+              return result
+            },
+            set: (data: any) => {
+              if (!persistentAuth.state.keys) persistentAuth.state.keys = {}
+              Object.assign(persistentAuth.state.keys, data)
+            },
+            clear: () => {
+              persistentAuth.state.keys = {}
+            },
+            keys: () => {
+              return Object.keys(persistentAuth.state.keys || {})
+            }
+          }
         },
         saveCreds: async () => {
-          persistentAuth.state.creds = authState.state.creds
-          persistentAuth.state.keys = authState.state.keys
+          persistentAuth.state.creds = customAuthState.state.creds
           await persistentAuth.saveState()
         }
       }
       
-      // Se não tem credenciais, usar useMultiFileAuthState padrão
-      if (!authState.state.creds) {
-        const standardAuth = await useMultiFileAuthState(baseDir)
-        
-        // Converter para nosso formato persistente
-        authState.state = standardAuth.state
-        authState.saveCreds = async () => {
-          await standardAuth.saveCreds()
-          // Também salvar no Supabase
-          persistentAuth.state.creds = authState.state.creds
-          persistentAuth.state.keys = authState.state.keys
-          await persistentAuth.saveState()
-        }
-      }
+      const authState = customAuthState
       
       if(authState?.state?.creds){
         console.warn('[wa][authstate][recovered]', { baseDir, attempt, hasCreds: !!authState.state.creds })

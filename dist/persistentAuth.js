@@ -158,13 +158,21 @@ function createPersistentAuthState(sessionId) {
                     // Carregar e deserializar credenciais
                     const rawCreds = JSON.parse(fs_1.default.readFileSync(credsPath, 'utf-8'));
                     this.state.creds = deserializeAuthData(rawCreds);
-                    // Carregar keys (podem ser múltiplos arquivos)
-                    const keyFiles = fs_1.default.readdirSync(localDir).filter(f => f.startsWith('app-state-sync-key-'));
+                    // Carregar keys - formato compatível com Baileys
                     this.state.keys = {};
+                    // Tentar carregar arquivos de key individuais primeiro (formato padrão do Baileys)
+                    const keyFiles = fs_1.default.existsSync(localDir) ?
+                        fs_1.default.readdirSync(localDir).filter(f => f.startsWith('app-state-sync-key-')) : [];
                     for (const keyFile of keyFiles) {
-                        const rawKeyData = JSON.parse(fs_1.default.readFileSync(path_1.default.join(localDir, keyFile), 'utf-8'));
-                        const deserializedKeys = deserializeAuthData(rawKeyData);
-                        Object.assign(this.state.keys, deserializedKeys);
+                        try {
+                            const keyId = keyFile.replace('app-state-sync-key-', '').replace('.json', '');
+                            const rawKeyData = JSON.parse(fs_1.default.readFileSync(path_1.default.join(localDir, keyFile), 'utf-8'));
+                            const deserializedKey = deserializeAuthData(rawKeyData);
+                            this.state.keys[keyId] = deserializedKey;
+                        }
+                        catch (err) {
+                            console.warn('[auth][load][key][error]', keyFile, err);
+                        }
                     }
                     console.log('[auth][load][local][ok]', sessionId);
                     return this.state;
@@ -177,7 +185,7 @@ function createPersistentAuthState(sessionId) {
             const supabaseAuth = await loadAuthFromSupabase(sessionId);
             if (supabaseAuth) {
                 this.state.creds = supabaseAuth.creds;
-                this.state.keys = supabaseAuth.keys;
+                this.state.keys = supabaseAuth.keys || {};
                 // Salvar localmente para próximas vezes
                 this.saveToLocal();
                 return this.state;
