@@ -72,6 +72,14 @@ function scheduleSave(sessionId: string) {
 
 export function appendMessage(sessionId: string, msg: StoredMessage) {
   const idx = load(sessionId)
+  
+  // Verificar se mensagem já existe (evitar duplicatas)
+  const exists = idx.messages.find(m => m.id === msg.id)
+  if (exists) {
+    console.log(`[messageStore] Mensagem duplicada ignorada: ${msg.id}`)
+    return
+  }
+  
   idx.messages.push(msg)
   // proteção de tamanho
   if (idx.messages.length > 5000) {
@@ -86,6 +94,8 @@ export function updateMessageStatus(sessionId: string, id: string, status: strin
   if (m) {
     m.status = status
     scheduleSave(sessionId)
+  } else {
+    console.warn(`[messageStore] Mensagem não encontrada para update status: ${id}`)
   }
 }
 

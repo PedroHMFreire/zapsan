@@ -9,6 +9,8 @@ const wa_1 = require("./wa");
 const mediaProcessor_1 = require("./mediaProcessor");
 const supaUsers_1 = require("./supaUsers");
 const userProfiles_1 = require("./userProfiles");
+const security_1 = require("./security");
+const auth_middleware_1 = require("./auth-middleware");
 const multer_1 = __importDefault(require("multer"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -88,6 +90,8 @@ schedules.filter(s => s.status === 'pending').forEach(scheduleDispatch);
 // If 'createOrLoadSession' exists but is exported with a different name, import it accordingly:
 // import { actualExportedName as createOrLoadSession, getQR, sendText } from './wa'
 const r = (0, express_1.Router)();
+// Aplicar middlewares de segurança globalmente
+r.use(auth_middleware_1.securityLogger);
 // Diagnóstico de ambiente de autenticação (não expõe chaves reais)
 r.get('/debug/auth-env', (_req, res) => {
     const flags = {
@@ -120,13 +124,28 @@ r.get('/debug/adaptive-config', (req, res) => {
 // Novo registro baseado em email + password
 r.post('/auth/register', async (req, res) => {
     try {
-        const email = String(req.body?.email || '').trim().toLowerCase();
-        const name = req.body?.name ? String(req.body.name).trim() : '';
+        // Rate limiting por IP
+        const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+        const rateCheck = (0, security_1.checkRateLimit)(clientIp);
+        if (!rateCheck.allowed) {
+            return res.status(429).json({
+                error: 'too_many_requests',
+                message: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
+            });
+        }
+        // Validação e sanitização
+        const email = (0, security_1.sanitizeInput)(String(req.body?.email || '').trim().toLowerCase(), 'email', 255);
+        const name = (0, security_1.sanitizeInput)(String(req.body?.name || '').trim(), 'name', 100);
         const password = String(req.body?.password || '');
+        if (!(0, security_1.validateEmail)(email)) {
+            return res.status(400).json({ error: 'invalid_email', message: 'Email inválido' });
+        }
         if (!email || !password)
             return res.status(400).json({ error: 'missing_fields' });
-        if (password.length < 6)
-            return res.status(400).json({ error: 'weak_password' });
+        if (password.length < 8)
+            return res.status(400).json({ error: 'weak_password', message: 'Senha deve ter pelo menos 8 caracteres' });
+        if (password.length > 128)
+            return res.status(400).json({ error: 'password_too_long', message: 'Senha muito longa' });
         const hash = await bcrypt_1.default.hash(password, 10);
         const { data, error } = await db_1.supa.from('users').upsert({ email, name: name || null, passwordHash: hash }, { onConflict: 'email' }).select('id, email, name').single();
         if (error) {
@@ -140,7 +159,12 @@ r.post('/auth/register', async (req, res) => {
         const userId = data.id;
         const sessionId = await (0, userSessions_1.getOrCreateUserSession)(userId);
         (0, wa_1.createOrLoadSession)(sessionId).catch(() => { });
-        res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false });
+        res.cookie('uid', userId, {
+            httpOnly: true,
+            sameSite: 'strict',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 dias
+        });
         return res.status(201).json({ ok: true, user: data, sessionId });
     }
     catch (err) {
@@ -150,10 +174,25 @@ r.post('/auth/register', async (req, res) => {
 // Login baseado em email + password
 r.post('/auth/login', async (req, res) => {
     try {
+        // Rate limiting
+        const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+        const rateCheck = (0, security_1.checkRateLimit)(clientIp);
+        if (!rateCheck.allowed) {
+            return res.status(429).json({
+                error: 'too_many_requests',
+                message: 'Muitas tentativas de login. Tente novamente em 1 hora.',
+                remainingAttempts: 0
+            });
+        }
+        // Sanitização e validação
         const email = String(req.body?.email || '').trim().toLowerCase();
         const password = String(req.body?.password || '');
-        if (!email || !password)
+        if (!(0, security_1.validateEmail)(email)) {
+            return res.status(400).json({ error: 'invalid_email', message: 'Email inválido' });
+        }
+        if (!email || !password) {
             return res.status(400).json({ error: 'missing_credentials' });
+        }
         const { data: u, error } = await db_1.supa.from('users')
             .select('id, email, name, passwordHash')
             .eq('email', email)
@@ -165,7 +204,12 @@ r.post('/auth/login', async (req, res) => {
             return res.status(401).json({ error: 'invalid_credentials' });
         const sessionId = await (0, userSessions_1.getOrCreateUserSession)(u.id);
         (0, wa_1.createOrLoadSession)(sessionId).catch(() => { });
-        res.cookie('uid', u.id, { httpOnly: true, sameSite: 'lax', secure: false });
+        res.cookie('uid', u.id, {
+            httpOnly: true,
+            sameSite: 'strict',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 dias
+        });
         return res.json({ ok: true, user: { id: u.id, email: u.email, name: u.name }, sessionId, sessionBoot: true });
     }
     catch (err) {
@@ -238,6 +282,11 @@ r.post('/sessions/create', async (req, res) => {
         if (!sessionId) {
             return res.status(400).json({ error: 'bad_request', message: 'session_id obrigatório' });
         }
+        if (!(0, security_1.validateSessionId)(sessionId)) {
+            return res.status(400).json({ error: 'invalid_session_id', message: 'session_id contém caracteres inválidos' });
+        }
+        // Sanitizar para logs
+        console.log(`[sessions/create] Tentativa de criar sessão: ${(0, security_1.sanitizeForLog)(sessionId)}`);
         // throttle per IP & global
         const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
         const allowed = (0, rateLimit_1.canCreateSession)(ip);
@@ -448,20 +497,27 @@ r.get('/sessions/:id/contacts', async (req, res) => {
     }
 });
 // Enviar texto via WhatsApp
-r.post('/messages/send', async (req, res) => {
-    console.log('[messages/send] Headers:', req.headers.cookie);
-    console.log('[messages/send] Body:', req.body);
+r.post('/messages/send', auth_middleware_1.requireAuth, auth_middleware_1.userRateLimit, async (req, res) => {
+    console.log(`[messages/send] Headers: ${(0, security_1.sanitizeForLog)(JSON.stringify(req.headers.cookie))}`);
+    console.log(`[messages/send] Body: ${(0, security_1.sanitizeForLog)(JSON.stringify(req.body))}`);
     try {
         const { to, text } = req.body || {};
-        const userId = (req.cookies?.uid) || String(req.body?.user || '');
-        console.log('[messages/send] userId extraído:', userId);
-        if (!userId)
-            return res.status(401).json({ error: 'unauthenticated' });
-        if (!to || !text) {
+        const userId = req.userId; // Já validado pelo requireAuth
+        // Validar e sanitizar entrada
+        const sanitizedTo = (0, security_1.sanitizeInput)(String(to || '').trim(), 'whatsapp_jid', 30);
+        const sanitizedText = (0, security_1.sanitizeHtml)(String(text || '').trim());
+        if (!sanitizedTo || !sanitizedText) {
             return res.status(400).json({ error: 'bad_request', message: 'to e text são obrigatórios' });
         }
+        if (sanitizedText.length > 4096) {
+            return res.status(400).json({ error: 'message_too_long', message: 'Mensagem muito longa (máximo 4096 caracteres)' });
+        }
+        // Validar JID se contém @
+        if (sanitizedTo.includes('@') && !(0, security_1.validateWhatsAppJid)(sanitizedTo)) {
+            return res.status(400).json({ error: 'invalid_jid', message: 'JID do WhatsApp inválido' });
+        }
         const session_id = await (0, userSessions_1.getOrCreateUserSession)(userId);
-        console.log('[messages/send] session_id:', session_id);
+        console.log(`[messages/send] session_id: ${(0, security_1.sanitizeForLog)(session_id)}`);
         const quota = (0, usage_1.checkQuota)(userId, session_id);
         if (!quota.ok) {
             return res.status(429).json({ error: 'quota_exceeded', remaining: 0, plan: quota.plan });
@@ -1030,7 +1086,9 @@ r.get('/sessions/:id/stream', (req, res) => {
         res.write(`event: recent\n`);
         res.write(`data: ${JSON.stringify(recent)}\n\n`);
     }
-    catch { }
+    catch (err) {
+        console.warn('[routes][sse][connection_error]', err);
+    }
     let closed = false;
     const unsub = (0, wa_1.onMessageStream)(id, (m) => {
         if (closed)
@@ -1042,7 +1100,9 @@ r.get('/sessions/:id/stream', (req, res) => {
             res.write(`event: message\n`);
             res.write(`data: ${JSON.stringify(payload)}\n\n`);
         }
-        catch { }
+        catch (writeErr) {
+            console.warn('[routes][sse][write_error]', writeErr);
+        }
     });
     // Cleanup na desconexão
     req.on('close', () => {
@@ -1051,7 +1111,9 @@ r.get('/sessions/:id/stream', (req, res) => {
         try {
             unsub();
         }
-        catch { }
+        catch (unsubErr) {
+            console.warn('[routes][sse][unsub_error]', unsubErr);
+        }
     });
 });
 // === Flows CRUD ===

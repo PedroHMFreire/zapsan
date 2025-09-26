@@ -53,6 +53,12 @@ function scheduleSave(sessionId) {
 }
 function appendMessage(sessionId, msg) {
     const idx = load(sessionId);
+    // Verificar se mensagem já existe (evitar duplicatas)
+    const exists = idx.messages.find(m => m.id === msg.id);
+    if (exists) {
+        console.log(`[messageStore] Mensagem duplicada ignorada: ${msg.id}`);
+        return;
+    }
     idx.messages.push(msg);
     // proteção de tamanho
     if (idx.messages.length > 5000) {
@@ -66,6 +72,9 @@ function updateMessageStatus(sessionId, id, status) {
     if (m) {
         m.status = status;
         scheduleSave(sessionId);
+    }
+    else {
+        console.warn(`[messageStore] Mensagem não encontrada para update status: ${id}`);
     }
 }
 function queryMessages(sessionId, opts) {

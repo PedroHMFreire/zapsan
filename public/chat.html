@@ -33,6 +33,7 @@
       </div>
     </div>
   </div>
+  <script src="/security-utils.js"></script>
   <script>
     let session_id = null;
     let aiEnabled = true; // Estado local da IA
@@ -126,10 +127,12 @@
       
       if (who === 'system') {
         el.className = 'msg system';
-        el.innerHTML = content; // Permite HTML para ícones
+        // Para mensagens do sistema, usar sanitização
+        safeSetHTML(el, content);
       } else {
         el.className = 'msg ' + (who === 'me' ? 'me' : 'bot');
-        el.textContent = content;
+        // Para mensagens normais, sempre usar textContent
+        safeSetInnerHTML(el, content);
       }
       
       list.appendChild(el);

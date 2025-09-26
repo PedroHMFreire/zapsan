@@ -72,6 +72,17 @@ async function batchHandler(req, res) {
         // Processar cada operação
         for (const batchReq of requests) {
             const reqStart = Date.now();
+            // Validar estrutura da requisição
+            if (!batchReq.id || !batchReq.method || !batchReq.endpoint) {
+                errorCount++;
+                results.push({
+                    id: batchReq.id || 'unknown',
+                    status: 400,
+                    error: 'invalid_request_structure',
+                    executionTime: Date.now() - reqStart
+                });
+                continue;
+            }
             try {
                 const result = await processBatchRequest(batchReq, req);
                 results.push({

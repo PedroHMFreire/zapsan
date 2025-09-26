@@ -7,7 +7,7 @@ require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const cors_1 = __importDefault(require("cors"));
-const compression = require('compression');
+const compression_1 = __importDefault(require("compression"));
 const path_1 = __importDefault(require("path"));
 const dns_1 = require("dns");
 const logger_1 = require("./logger");
@@ -32,15 +32,32 @@ process.on('uncaughtException', (err) => {
 });
 // Middlewares básicos
 app.use((0, cors_1.default)());
-app.use(compression({
+app.use((0, compression_1.default)({
     filter: (req, res) => {
         if (req.headers['x-no-compression'])
             return false;
-        return compression.filter(req, res);
+        return compression_1.default.filter(req, res);
     },
     threshold: 1024, // Apenas arquivos > 1KB
     level: 6 // Balanceio compressão/CPU
 }));
+// Security headers
+app.use((req, res, next) => {
+    // Content Security Policy
+    res.setHeader('Content-Security-Policy', "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: blob: https:; " +
+        "connect-src 'self' wss: ws:; " +
+        "media-src 'self' blob:; " +
+        "font-src 'self';");
+    // XSS Protection
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+});
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
 app.use((0, cookie_parser_1.default)());
@@ -118,7 +135,6 @@ app.use((req, res, next) => {
     next();
 });
 // Erros padrão em JSON
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err, _req, res, _next) => {
     logger_1.logger.error({ err }, 'Unhandled error');
     res.status(500).json({ error: 'internal_error' });

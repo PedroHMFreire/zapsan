@@ -2,7 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
-const compression = require('compression')
+import compression from 'compression'
 import path from 'path'
 import { setDefaultResultOrder } from 'dns'
 import { logger } from './logger'
@@ -40,6 +40,27 @@ app.use(compression({
   threshold: 1024, // Apenas arquivos > 1KB
   level: 6 // Balanceio compressão/CPU
 }))
+
+// Security headers
+app.use((req, res, next) => {
+  // Content Security Policy
+  res.setHeader('Content-Security-Policy', 
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob: https:; " +
+    "connect-src 'self' wss: ws:; " +
+    "media-src 'self' blob:; " +
+    "font-src 'self';"
+  )
+  // XSS Protection
+  res.setHeader('X-XSS-Protection', '1; mode=block')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  next()
+})
+
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(cookieParser())
@@ -130,7 +151,6 @@ app.use((req, res, next) => {
 })
 
 // Erros padrão em JSON
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err }, 'Unhandled error')
   res.status(500).json({ error: 'internal_error' })

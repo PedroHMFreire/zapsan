@@ -5,6 +5,8 @@ import { serveMedia } from './mediaProcessor'
 import { authenticate, upsertUserIfMissing, findUser, createUser } from './users'
 import { registerUser, loginUser, fetchUserProfile } from './supaUsers'
 import { getUserProfile, createOrUpdateUserProfile, getUserKnowledge, updateUserKnowledge, createUserDataStructure } from './userProfiles'
+import { sanitizeHtml, validateSessionId, validateEmail, sanitizeUsername, validateWhatsAppJid, checkRateLimit, sanitizeForLog, sanitizeInput } from './security'
+import { requireAuth, requireSessionOwnership, securityLogger, userRateLimit } from './auth-middleware'
 import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
@@ -82,6 +84,9 @@ schedules.filter(s => s.status === 'pending').forEach(scheduleDispatch)
 
 const r = Router()
 
+// Aplicar middlewares de segurança globalmente
+r.use(securityLogger)
+
 // Diagnóstico de ambiente de autenticação (não expõe chaves reais)
 r.get('/debug/auth-env', (_req: Request, res: Response) => {
   const flags = {
@@ -118,11 +123,28 @@ r.get('/debug/adaptive-config', (req: Request, res: Response) => {
 // Novo registro baseado em email + password
 r.post('/auth/register', async (req: Request, res: Response) => {
   try {
-    const email = String(req.body?.email||'').trim().toLowerCase()
-    const name = req.body?.name ? String(req.body.name).trim() : ''
-    const password = String(req.body?.password||'')
+    // Rate limiting por IP
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown'
+    const rateCheck = checkRateLimit(clientIp)
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ 
+        error: 'too_many_requests',
+        message: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
+      })
+    }
+    
+    // Validação e sanitização
+    const email = sanitizeInput(String(req.body?.email || '').trim().toLowerCase(), 'email', 255)
+    const name = sanitizeInput(String(req.body?.name || '').trim(), 'name', 100)
+    const password = String(req.body?.password || '')
+    
+    if (!validateEmail(email)) {
+      return res.status(400).json({ error: 'invalid_email', message: 'Email inválido' })
+    }
+    
     if(!email || !password) return res.status(400).json({ error: 'missing_fields' })
-    if(password.length < 6) return res.status(400).json({ error: 'weak_password' })
+    if(password.length < 8) return res.status(400).json({ error: 'weak_password', message: 'Senha deve ter pelo menos 8 caracteres' })
+    if(password.length > 128) return res.status(400).json({ error: 'password_too_long', message: 'Senha muito longa' })
     const hash = await bcrypt.hash(password, 10)
     const { data, error } = await supa.from('users').upsert(
       { email, name: name || null, passwordHash: hash },
@@ -137,7 +159,12 @@ r.post('/auth/register', async (req: Request, res: Response) => {
     const userId = data.id
     const sessionId = await getOrCreateUserSession(userId)
     createOrLoadSession(sessionId).catch(()=>{})
-    res.cookie('uid', userId, { httpOnly: true, sameSite: 'lax', secure: false })
+    res.cookie('uid', userId, { 
+      httpOnly: true, 
+      sameSite: 'strict', 
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 dias
+    })
     return res.status(201).json({ ok:true, user: data, sessionId })
   } catch(err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
@@ -147,9 +174,28 @@ r.post('/auth/register', async (req: Request, res: Response) => {
 // Login baseado em email + password
 r.post('/auth/login', async (req: Request, res: Response) => {
   try {
-    const email = String(req.body?.email||'').trim().toLowerCase()
-    const password = String(req.body?.password||'')
-    if(!email || !password) return res.status(400).json({ error: 'missing_credentials' })
+    // Rate limiting
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown'
+    const rateCheck = checkRateLimit(clientIp)
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ 
+        error: 'too_many_requests',
+        message: 'Muitas tentativas de login. Tente novamente em 1 hora.',
+        remainingAttempts: 0
+      })
+    }
+    
+    // Sanitização e validação
+    const email = String(req.body?.email || '').trim().toLowerCase()
+    const password = String(req.body?.password || '')
+    
+    if (!validateEmail(email)) {
+      return res.status(400).json({ error: 'invalid_email', message: 'Email inválido' })
+    }
+    
+    if (!email || !password) {
+      return res.status(400).json({ error: 'missing_credentials' })
+    }
     const { data: u, error } = await supa.from('users')
       .select('id, email, name, passwordHash')
       .eq('email', email)
@@ -159,7 +205,12 @@ r.post('/auth/login', async (req: Request, res: Response) => {
     if(!ok) return res.status(401).json({ error: 'invalid_credentials' })
     const sessionId = await getOrCreateUserSession(u.id)
     createOrLoadSession(sessionId).catch(()=>{})
-    res.cookie('uid', u.id, { httpOnly: true, sameSite: 'lax', secure: false })
+    res.cookie('uid', u.id, { 
+      httpOnly: true, 
+      sameSite: 'strict', 
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 dias
+    })
     return res.json({ ok:true, user: { id: u.id, email: u.email, name: u.name }, sessionId, sessionBoot: true })
   } catch(err:any){
     return res.status(500).json({ error: 'internal_error', message: err?.message })
@@ -234,6 +285,13 @@ r.post('/sessions/create', async (req: Request, res: Response) => {
     if (!sessionId) {
       return res.status(400).json({ error: 'bad_request', message: 'session_id obrigatório' })
     }
+    
+    if (!validateSessionId(sessionId)) {
+      return res.status(400).json({ error: 'invalid_session_id', message: 'session_id contém caracteres inválidos' })
+    }
+    
+    // Sanitizar para logs
+    console.log(`[sessions/create] Tentativa de criar sessão: ${sanitizeForLog(sessionId)}`)
     // throttle per IP & global
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
     const allowed = canCreateSession(ip)
@@ -438,21 +496,32 @@ r.get('/sessions/:id/contacts', async (req: Request, res: Response) => {
 })
 
 // Enviar texto via WhatsApp
-r.post('/messages/send', async (req: Request, res: Response) => {
-  console.log('[messages/send] Headers:', req.headers.cookie)
-  console.log('[messages/send] Body:', req.body)
+r.post('/messages/send', requireAuth, userRateLimit, async (req: Request, res: Response) => {
+  console.log(`[messages/send] Headers: ${sanitizeForLog(JSON.stringify(req.headers.cookie))}`)
+  console.log(`[messages/send] Body: ${sanitizeForLog(JSON.stringify(req.body))}`)
   
   try {
     const { to, text } = req.body || {}
-    const userId = (req.cookies?.uid) || String(req.body?.user||'')
-    console.log('[messages/send] userId extraído:', userId)
+    const userId = req.userId! // Já validado pelo requireAuth
     
-    if(!userId) return res.status(401).json({ error: 'unauthenticated' })
-    if (!to || !text) {
+    // Validar e sanitizar entrada
+    const sanitizedTo = sanitizeInput(String(to || '').trim(), 'whatsapp_jid', 30)
+    const sanitizedText = sanitizeHtml(String(text || '').trim())
+    
+    if (!sanitizedTo || !sanitizedText) {
       return res.status(400).json({ error: 'bad_request', message: 'to e text são obrigatórios' })
     }
+    
+    if (sanitizedText.length > 4096) {
+      return res.status(400).json({ error: 'message_too_long', message: 'Mensagem muito longa (máximo 4096 caracteres)' })
+    }
+    
+    // Validar JID se contém @
+    if (sanitizedTo.includes('@') && !validateWhatsAppJid(sanitizedTo)) {
+      return res.status(400).json({ error: 'invalid_jid', message: 'JID do WhatsApp inválido' })
+    }
   const session_id = await getOrCreateUserSession(userId)
-  console.log('[messages/send] session_id:', session_id)
+  console.log(`[messages/send] session_id: ${sanitizeForLog(session_id)}`)
   
     const quota = checkQuota(userId, session_id)
     if(!quota.ok){
@@ -1037,7 +1106,9 @@ r.get('/sessions/:id/stream', (req: Request, res: Response) => {
     const recent = getMessagesNew(id, paginationConfig.messageLimit)
     res.write(`event: recent\n`)
     res.write(`data: ${JSON.stringify(recent)}\n\n`)
-  } catch {}
+  } catch (err) {
+    console.warn('[routes][sse][connection_error]', err)
+  }
   let closed = false
   const unsub = onMessageStream(id, (m) => {
     if (closed) return
@@ -1047,14 +1118,18 @@ r.get('/sessions/:id/stream', (req: Request, res: Response) => {
       const payload = { type: 'message', ...m }
       res.write(`event: message\n`)
       res.write(`data: ${JSON.stringify(payload)}\n\n`)
-    } catch {}
+    } catch (writeErr) {
+      console.warn('[routes][sse][write_error]', writeErr)
+    }
   })
   
   // Cleanup na desconexão
   req.on('close', () => { 
     closed = true
     clearTimeout(timeoutHandle)
-    try { unsub() } catch {} 
+    try { unsub() } catch (unsubErr) {
+      console.warn('[routes][sse][unsub_error]', unsubErr)
+    } 
   })
 })
 

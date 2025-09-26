@@ -746,10 +746,13 @@
 
   function pushMsg(dir,text,id,mediaInfo){
     const temp = !id;
-    id = id || (Date.now().toString(36)+'-'+(msgSeq++).toString(36));
+    const timestamp = Date.now();
+    id = id || (timestamp.toString(36)+'-'+(msgSeq++).toString(36));
+    
     const el=document.createElement('div');
     el.className='msg '+(dir==='out'?'out':'in');
     el.setAttribute('data-id', id);
+    el.setAttribute('data-timestamp', timestamp.toString()); // Para reconciliação otimista
     
     // Verificar se tem mídia
     if(mediaInfo && mediaInfo.type !== 'document') {
@@ -1300,8 +1303,8 @@
     btnClean.disabled=true; try{ const r=await fetch('/me/session/clean',{method:'POST'}); if(r.ok){ toast('Sessão limpa'); loadProfile(); } else toast('Erro limpar','err'); } finally { btnClean.disabled=false; }
   });
   btnLogout?.addEventListener('click', async ()=>{
-    try { const r=await fetch('/me/logout',{method:'POST'}); } catch {}
-    try { localStorage.removeItem('auth'); localStorage.removeItem('sessionId'); localStorage.removeItem('userId'); } catch {}
+    try { const r=await fetch('/me/logout',{method:'POST'}); } catch (err) { console.warn('Logout request failed:', err); }
+    try { localStorage.removeItem('auth'); localStorage.removeItem('sessionId'); localStorage.removeItem('userId'); } catch (err) { console.warn('LocalStorage cleanup failed:', err); }
     location.replace('/login.html');
   });
 
@@ -1417,23 +1420,40 @@
       const m = ev.message || ev;
       const jid = m.fromMe ? (m.to || m.from) : m.from;
       if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
-      // evitar duplicados
-      if(!messagesByJid.get(jid).some(x=>x.id===m.id)){
-        messagesByJid.get(jid).push({ 
-          id:m.id, 
-          text:m.text||'', 
-          fromMe:!!m.fromMe, 
-          timestamp:m.timestamp||Date.now(),
-          mediaInfo: m.mediaInfo || null
-        });
+      
+      // Evitar duplicados baseado no ID da mensagem
+      const existingMsgs = messagesByJid.get(jid);
+      if(existingMsgs.some(x => x.id === m.id)){
+        console.log('Mensagem duplicada ignorada:', m.id);
+        return;
       }
-      // Reconciliação otimista: se mensagem fromMe e possuímos .pending com mesmo texto recente
-      if(m.fromMe && currentChat && currentChat.id===jid){
-        // procure a última .pending cujo texto combine
+      
+      existingMsgs.push({ 
+        id: m.id, 
+        text: m.text || '', 
+        fromMe: !!m.fromMe, 
+        timestamp: m.timestamp || Date.now(),
+        mediaInfo: m.mediaInfo || null
+      });
+      
+      // Reconciliação otimista melhorada: usar timestamp e texto para matching
+      if(m.fromMe && currentChat && currentChat.id === jid){
         const pendings = [...messagesEl.querySelectorAll('.msg.out.pending')];
-        for(let i=pendings.length-1;i>=0;i--){
-          const el=pendings[i];
-          if(el.textContent=== (m.text||'')){ el.classList.remove('pending'); el.setAttribute('data-id', m.id); break; }
+        const msgText = (m.text || '').trim();
+        
+        // Procurar pending message com texto similar nos últimos 30 segundos
+        for(let i = pendings.length - 1; i >= 0; i--){
+          const el = pendings[i];
+          const elText = (el.textContent || '').trim();
+          const elTime = parseInt(el.dataset.timestamp) || 0;
+          const timeDiff = Math.abs((m.timestamp || Date.now()) - elTime);
+          
+          if(elText === msgText && timeDiff < 30000){ // 30s window
+            el.classList.remove('pending');
+            el.setAttribute('data-id', m.id);
+            console.log('Reconciliação otimista bem sucedida:', m.id);
+            break;
+          }
         }
       }
       // atualizar chat

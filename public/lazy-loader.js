@@ -112,19 +112,22 @@ class LazyMediaLoader {
         
         // Para outros tipos, fetch direto
         const response = await fetch(src)
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`)
         
         const blob = await response.blob()
         return URL.createObjectURL(blob)
         
       } catch (error) {
         lastError = error
+        console.warn(`LazyLoader: Attempt ${attempt}/${this.options.retryAttempts} failed for ${src}:`, error.message)
+        
         if (attempt < this.options.retryAttempts) {
           await this.wait(1000 * attempt) // Backoff exponencial
         }
       }
     }
     
+    console.error(`LazyLoader: All attempts failed for ${src}:`, lastError)
     throw lastError
   }
 

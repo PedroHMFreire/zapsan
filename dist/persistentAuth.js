@@ -49,7 +49,7 @@ function deserializeAuthData(data) {
             }
             catch (err) {
                 console.warn('[auth][deserialize] Invalid base64 Buffer:', err);
-                return data;
+                return null; // Retorna null ao invés do dado corrompido
             }
         }
         if (data.__type === 'Uint8Array' && typeof data.data === 'string') {
@@ -58,7 +58,7 @@ function deserializeAuthData(data) {
             }
             catch (err) {
                 console.warn('[auth][deserialize] Invalid base64 Uint8Array:', err);
-                return data;
+                return null; // Retorna null ao invés do dado corrompido
             }
         }
         // Processar recursivamente outros objetos
@@ -73,6 +73,7 @@ function deserializeAuthData(data) {
 // Salvar credenciais no Supabase
 async function saveAuthToSupabase(sessionId, creds, keys) {
     try {
+        console.log('🔥 [SYNC_DEBUG] ENTRADA saveAuthToSupabase para', sessionId);
         console.log('[auth][save][supabase][attempting]', sessionId, {
             hasCreds: !!creds,
             hasKeys: !!keys,
@@ -80,12 +81,15 @@ async function saveAuthToSupabase(sessionId, creds, keys) {
             keysType: typeof keys
         });
         // Serializar dados convertendo Buffers para formato JSON seguro
+        console.log('🔥 [SYNC_DEBUG] Serializando dados...');
         const serializedCreds = serializeAuthData(creds);
         const serializedKeys = serializeAuthData(keys);
+        console.log('✅ [SYNC_DEBUG] Dados serializados com sucesso');
         console.log('[auth][save][supabase][serialized]', sessionId, {
             serializedCredsSize: JSON.stringify(serializedCreds).length,
             serializedKeysSize: JSON.stringify(serializedKeys).length
         });
+        console.log('🔥 [SYNC_DEBUG] Fazendo upsert no Supabase...');
         const { data, error } = await db_1.supa
             .from('wa_sessions')
             .upsert({
@@ -104,12 +108,14 @@ async function saveAuthToSupabase(sessionId, creds, keys) {
                 hint: error.hint,
                 code: error.code
             });
+            console.log('❌ [SYNC_DEBUG] ERRO no upsert Supabase:', error);
             return false;
         }
         console.log('[auth][save][supabase][success]', sessionId, {
             inserted: !!data,
             rowCount: data?.length || 0
         });
+        console.log('✅ [SYNC_DEBUG] SUCESSO no upsert Supabase:', data);
         return true;
     }
     catch (err) {
@@ -126,12 +132,24 @@ async function loadAuthFromSupabase(sessionId) {
             .eq('session_id', sessionId)
             .single();
         if (error || !data) {
-            console.log('[auth][load][supabase][not_found]', sessionId);
+            console.log('[auth][load][supabase][not_found]', sessionId, error?.message || 'no data');
+            return null;
+        }
+        // Validar se os dados existem e são strings válidas
+        if (!data.creds || !data.keys) {
+            console.warn('[auth][load][supabase][invalid_data]', sessionId, 'missing creds or keys');
             return null;
         }
         // Deserializar dados convertendo Objects de volta para Buffers
-        const rawCreds = JSON.parse(data.creds);
-        const rawKeys = JSON.parse(data.keys);
+        let rawCreds, rawKeys;
+        try {
+            rawCreds = JSON.parse(data.creds);
+            rawKeys = JSON.parse(data.keys);
+        }
+        catch (parseErr) {
+            console.error('[auth][load][supabase][parse_error]', sessionId, parseErr);
+            return null;
+        }
         const creds = deserializeAuthData(rawCreds);
         const keys = deserializeAuthData(rawKeys);
         console.log('[auth][load][supabase][ok]', sessionId);
@@ -274,38 +292,55 @@ function createPersistentAuthState(sessionId) {
             return this.state;
         },
         async saveState() {
+            console.log('🔥 [SYNC_DEBUG] INÍCIO saveState() para', sessionId);
             // Validar dados antes de salvar
             if (!this.state.creds && !this.state.keys) {
                 console.warn('[auth][save][empty_state]', sessionId, 'nenhuma credencial para salvar');
+                console.log('⚠️ [SYNC_DEBUG] ERRO: Estado vazio, nenhuma credencial para salvar');
                 return;
             }
+            console.log('🔥 [SYNC_DEBUG] Estado validado:', {
+                hasCreds: !!this.state.creds,
+                hasKeys: !!this.state.keys,
+                keysCount: this.state.keys ? Object.keys(this.state.keys).length : 0
+            });
             console.log('[auth][save][starting]', sessionId, {
                 hasCreds: !!this.state.creds,
                 hasKeys: !!this.state.keys,
                 keysCount: this.state.keys ? Object.keys(this.state.keys).length : 0
             });
             // Salvar localmente primeiro (mais rápido e confiável)
+            console.log('🔥 [SYNC_DEBUG] Salvando localmente...');
             try {
                 this.saveToLocal();
+                console.log('✅ [SYNC_DEBUG] Salvo localmente com sucesso');
             }
             catch (localErr) {
                 console.error('[auth][save][local][error]', sessionId, localErr);
+                console.log('❌ [SYNC_DEBUG] ERRO ao salvar localmente:', localErr);
             }
             // Backup no Supabase com retry
+            console.log('🔥 [SYNC_DEBUG] Iniciando backup no Supabase...');
             let saved = false;
             let attempts = 0;
             const maxAttempts = 3;
             while (!saved && attempts < maxAttempts) {
                 attempts++;
+                console.log(`🔥 [SYNC_DEBUG] Tentativa ${attempts}/${maxAttempts} de salvar no Supabase...`);
                 try {
                     saved = await saveAuthToSupabase(sessionId, this.state.creds, this.state.keys);
                     if (saved) {
                         console.log('[auth][save][complete]', sessionId, `local + supabase (attempt ${attempts})`);
+                        console.log(`✅ [SYNC_DEBUG] Credenciais salvas no Supabase na tentativa ${attempts}!`);
                         break;
+                    }
+                    else {
+                        console.log(`⚠️ [SYNC_DEBUG] saveAuthToSupabase retornou false na tentativa ${attempts}`);
                     }
                 }
                 catch (err) {
                     console.error(`[auth][save][supabase][attempt_${attempts}]`, sessionId, err);
+                    console.log(`❌ [SYNC_DEBUG] ERRO na tentativa ${attempts}:`, err);
                     if (attempts < maxAttempts) {
                         await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
                     }
@@ -313,6 +348,10 @@ function createPersistentAuthState(sessionId) {
             }
             if (!saved) {
                 console.error('[auth][save][supabase][failed]', sessionId, `após ${attempts} tentativas`);
+                console.log(`❌ [SYNC_DEBUG] FALHA TOTAL: Não foi possível salvar no Supabase após ${attempts} tentativas`);
+            }
+            else {
+                console.log(`✅ [SYNC_DEBUG] FIM saveState() - credenciais salvas com sucesso`);
             }
         },
         saveToLocal() {
@@ -326,6 +365,11 @@ function createPersistentAuthState(sessionId) {
                 if (this.state.keys) {
                     // Salvar keys como arquivos separados (padrão Baileys)
                     Object.entries(this.state.keys).forEach(([keyName, keyData]) => {
+                        // Pular dados nulos ou corrompidos
+                        if (keyData === null || keyData === undefined) {
+                            console.warn(`[auth][save][local] Skipping null/undefined key: ${keyName}`);
+                            return;
+                        }
                         const serializedKeyData = serializeAuthData(keyData);
                         // Determinar o nome do arquivo baseado no tipo de key
                         let fileName;

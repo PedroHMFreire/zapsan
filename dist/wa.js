@@ -106,6 +106,91 @@ function canSendSyncErrorMessage(from) {
     syncErrorMessageSent.set(key, now);
     return true;
 }
+// Função centralizada para inserir mensagens (evita duplicação)
+async function insertMessage(sessionId, msgObj, originalMsg, fromMe, text, timestamp) {
+    try {
+        // 1. Salvar no store em memória
+        pushMsg(sessionId, msgObj);
+        // 2. Persistir em disco (arquivo JSON) - com debounce
+        try {
+            (0, messageStore_1.appendMessage)(sessionId, { ...msgObj, text, fromMe });
+        }
+        catch (err) {
+            console.warn('[wa][disk][save][error]', sessionId, err);
+        }
+        // 3. Indexar para busca
+        try {
+            const { indexMessage } = await Promise.resolve().then(() => __importStar(require('./searchIndex')));
+            indexMessage({
+                id: msgObj.id,
+                from: msgObj.from,
+                to: msgObj.to,
+                text,
+                timestamp,
+                fromMe
+            });
+        }
+        catch (err) {
+            console.warn('[wa][index][error]', sessionId, err);
+        }
+        // 4. Persistir no Postgres/Supabase (apenas uma vez)
+        try {
+            const tsDate = new Date(timestamp);
+            const { error: msgErr } = await db_1.supa.from('messages').upsert({
+                session_key: sessionId,
+                jid: msgObj.from,
+                wa_msg_id: msgObj.id,
+                from_me: fromMe,
+                body: text || null,
+                timestamp: tsDate,
+                raw: originalMsg
+            }, {
+                onConflict: 'session_key,wa_msg_id' // Evita duplicatas
+            });
+            if (msgErr && !/duplicate|unique/i.test(msgErr.message)) {
+                console.warn('[wa][db][message_insert][warn]', sessionId, msgErr.message);
+            }
+        }
+        catch (e) {
+            if (!/Unique constraint|duplicate/i.test(e?.message || '')) {
+                console.warn('[wa][db][message_insert][error]', sessionId, e?.message);
+            }
+        }
+        // 5. Broadcast para clientes SSE
+        try {
+            (0, realtime_1.broadcast)(sessionId, 'message', msgObj);
+        }
+        catch (err) {
+            console.warn('[wa][broadcast][error]', sessionId, err);
+        }
+    }
+    catch (err) {
+        console.error('[wa][insertMessage][critical_error]', sessionId, err);
+    }
+}
+// Função auxiliar para upsert de contatos
+async function upsertContact(sessionId, jid, pushName, isGroup) {
+    const seen = seenSetFor(sessionId);
+    if (seen.has(jid))
+        return; // Já processado
+    seen.add(jid);
+    const numberOrJid = jid.replace(/@.*/, '');
+    const provisionalName = isGroup ? null : (pushName || numberOrJid);
+    try {
+        const { error } = await db_1.supa.from('contacts').upsert({ session_key: sessionId, jid, name: provisionalName, is_group: isGroup }, { onConflict: 'session_key,jid' });
+        if (!error) {
+            try {
+                (0, realtime_1.broadcast)(sessionId, 'contact_upsert', { jid, name: provisionalName, is_group: isGroup });
+            }
+            catch (broadcastErr) {
+                console.warn('[wa][contact][broadcast][error]', sessionId, broadcastErr);
+            }
+        }
+    }
+    catch (err) {
+        console.warn('[wa][contact][upsert][error]', sessionId, err);
+    }
+}
 // 🧹 Helper to clean corrupted sessions with error 515
 // and to handle PreKey errors by clearing problematic keys
 async function clearSessionKeys(sessionId, reason) {
@@ -276,42 +361,6 @@ try {
 catch (err) {
     // eslint-disable-next-line no-console
     console.error('[wa][init][error_mkdir]', SESS_DIR, err?.message);
-    // 🧹 Cleanup corrupted sessions on startup
-    async function cleanupCorruptedSessionsOnStartup() {
-        try {
-            console.log('[wa][startup] Verificando sessões corrompidas...');
-            // Check filesystem for sessions
-            const sessionDirs = fs_1.default.readdirSync(SESS_DIR).filter(dir => {
-                const sessionPath = path_1.default.join(SESS_DIR, dir);
-                try {
-                    return fs_1.default.statSync(sessionPath).isDirectory();
-                }
-                catch {
-                    return false;
-                }
-            });
-            for (const sessionId of sessionDirs) {
-                const metaPath = path_1.default.join(SESS_DIR, sessionId, 'meta.json');
-                try {
-                    if (fs_1.default.existsSync(metaPath)) {
-                        const meta = JSON.parse(fs_1.default.readFileSync(metaPath, 'utf8'));
-                        // If session has error 515 and never opened, clean it
-                        if (meta.lastDisconnectCode === 515 && !meta.everOpened && (meta.criticalCount || 0) >= 2) {
-                            console.warn(`[wa][startup] Limpando sessão corrompida: ${sessionId}`);
-                            await cleanCorruptedSession(sessionId, path_1.default.join(SESS_DIR, sessionId));
-                        }
-                    }
-                }
-                catch (err) {
-                    console.warn(`[wa][startup] Erro verificando meta de ${sessionId}:`, err);
-                }
-            }
-            console.log('[wa][startup] Limpeza de sessões concluída');
-        }
-        catch (error) {
-            console.error('[wa][startup] Erro durante limpeza:', error);
-        }
-    }
 }
 // Wrapper com retry para lidar com condição rara de ENOENT em init auth state (FS lento ou remoção concorrente)
 async function prepareAuthState(baseDir, sessionId) {
@@ -330,12 +379,16 @@ async function prepareAuthState(baseDir, sessionId) {
                 const authState = {
                     state: standardAuth.state,
                     saveCreds: async () => {
+                        console.log('🔄 [SYNC_DEBUG] saveCreds NOVA SESSÃO iniciado para', sessionId);
                         console.log(`[auth][save] Salvando credenciais para ${sessionId}`);
                         await standardAuth.saveCreds();
+                        console.log('📁 [SYNC_DEBUG] standardAuth.saveCreds concluído');
                         // Também salvar no Supabase
                         persistentAuth.state.creds = standardAuth.state.creds;
                         persistentAuth.state.keys = standardAuth.state.keys;
+                        console.log('🔄 [SYNC_DEBUG] Chamando persistentAuth.saveState()...');
                         await persistentAuth.saveState();
+                        console.log('✅ [SYNC_DEBUG] persistentAuth.saveState() concluído');
                     }
                 };
                 return authState;
@@ -393,12 +446,13 @@ async function prepareAuthState(baseDir, sessionId) {
                     }
                 },
                 saveCreds: async () => {
+                    console.log('🔄 [SYNC_DEBUG] saveCreds SESSÃO EXISTENTE iniciado para', sessionId);
                     console.log(`[auth][save] Salvando credenciais existentes para ${sessionId}`);
                     // Atualizar as credenciais
                     persistentAuth.state.creds = customAuthState.state.creds;
-                    // As keys já são atualizadas automaticamente através do método 'set' acima
-                    // que chama persistentAuth.saveState() automaticamente
+                    console.log('🔄 [SYNC_DEBUG] Chamando persistentAuth.saveState()...');
                     await persistentAuth.saveState();
+                    console.log('✅ [SYNC_DEBUG] persistentAuth.saveState() concluído');
                 }
             };
             const authState = customAuthState;
@@ -664,7 +718,18 @@ async function createOrLoadSession(sessionId) {
         // Não definir sess.qr = null aqui - deixar que o evento QR defina quando disponível
         if (!sess.messages)
             sess.messages = [];
-        sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', async () => {
+            console.log('�🚨🚨 CREDS.UPDATE DISPARADO! 🚨🚨🚨');
+            console.log('📢 [HIPÓTESE 1] SessionId:', sessionId);
+            console.log('�🔥 [SYNC_DEBUG] creds.update DISPARADO para', sessionId);
+            try {
+                await saveCreds();
+                console.log('✅ [SYNC_DEBUG] saveCreds SUCESSO para', sessionId);
+            }
+            catch (err) {
+                console.error('❌ [SYNC_DEBUG] saveCreds FALHOU para', sessionId, err);
+            }
+        });
         // 🔧 FIX: Handler para erros de descriptografia (PreKey/SessionKey) 
         sock.ev.on('message-receipt.update', async (receipts) => {
             try {
@@ -966,67 +1031,11 @@ async function createOrLoadSession(sessionId) {
                             }
                         })
                     };
-                    pushMsg(sessionId, msgObj);
+                    // Centralizar inserção de mensagens para evitar race conditions
+                    await insertMessage(sessionId, msgObj, m, fromMe, text, ts);
                     // Auto-cadastro do contato no primeiro contato (leve e idempotente)
-                    try {
-                        if (!fromMe && from) {
-                            const seen = seenSetFor(sessionId);
-                            if (!seen.has(from)) {
-                                seen.add(from);
-                                const isGroup = from.endsWith('@g.us');
-                                const numberOrJid = from.replace(/@.*/, '');
-                                const provisionalName = isGroup ? null : (m.pushName || numberOrJid);
-                                try {
-                                    const { error } = await db_1.supa.from('contacts').upsert({ session_key: sessionId, jid: from, name: provisionalName, is_group: isGroup }, { onConflict: 'session_key,jid' });
-                                    if (!error) {
-                                        try {
-                                            (0, realtime_1.broadcast)(sessionId, 'contact_upsert', { jid: from, name: provisionalName, is_group: isGroup });
-                                        }
-                                        catch { }
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-                    }
-                    catch { }
-                    // Persistir em disco e indexar para busca/histórico
-                    try {
-                        (0, messageStore_1.appendMessage)(sessionId, { ...msgObj, text, fromMe });
-                    }
-                    catch { }
-                    try {
-                        (0, searchIndex_1.indexMessage)({ id, from, to, text, timestamp: ts, fromMe });
-                    }
-                    catch { }
-                    // Persistir em Postgres
-                    try {
-                        const waMsgId = id;
-                        const jid = from;
-                        const body = text || null;
-                        // Converte timestamp ms para Date
-                        const tsDate = new Date(ts);
-                        // Supabase insert de mensagem
-                        const { error: msgErr } = await db_1.supa.from('messages').insert({
-                            session_key: sessionId,
-                            jid,
-                            wa_msg_id: waMsgId,
-                            from_me: fromMe,
-                            body: body,
-                            timestamp: tsDate,
-                            raw: m
-                        });
-                        if (msgErr) {
-                            if (!/duplicate|unique/i.test(msgErr.message)) {
-                                console.warn('[wa][supa][message_insert][warn]', sessionId, msgErr.message);
-                            }
-                        }
-                    }
-                    catch (e) {
-                        // Evitar spam massivo: log só mensagem resumida
-                        if (!/Unique constraint|Foreign key/.test(e?.message || '')) {
-                            console.warn('[wa][prisma][message_create][warn]', sessionId, e?.message);
-                        }
+                    if (!fromMe && from) {
+                        await upsertContact(sessionId, from, m.pushName, from.endsWith('@g.us'));
                     }
                     // 🤖 RESPOSTA AUTOMÁTICA DA IA (apenas para mensagens recebidas)
                     const sess = sessions.get(sessionId);
@@ -1060,16 +1069,8 @@ async function createOrLoadSession(sessionId) {
                                     fromMe: true,
                                     timestamp: Date.now()
                                 };
-                                // Salvar no store e broadcast
-                                pushMsg(sessionId, aiMsgObj);
-                                try {
-                                    (0, messageStore_1.appendMessage)(sessionId, { ...aiMsgObj, fromMe: true });
-                                }
-                                catch { }
-                                try {
-                                    (0, realtime_1.broadcast)(sessionId, 'message', aiMsgObj);
-                                }
-                                catch { }
+                                // Salvar mensagem da IA usando função centralizada
+                                await insertMessage(sessionId, aiMsgObj, null, true, aiResponse, Date.now());
                             }
                         }
                         catch (aiError) {

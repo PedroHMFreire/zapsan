@@ -217,7 +217,10 @@ async function networkFirst(request, cacheName, ttl = null) {
     return response
     
   } catch (error) {
-    console.warn(`⚠️ SW: Network failed for ${request.url}, trying cache...`)
+    const isTimeout = error.name === 'TypeError' && error.message.includes('fetch')
+    const errorType = isTimeout ? 'timeout' : 'network error'
+    
+    console.warn(`⚠️ SW: ${errorType} for ${request.url}, trying cache...`, error.message)
     
     // Network falhou, tentar cache
     const cache = await caches.open(cacheName)
