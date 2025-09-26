@@ -359,7 +359,13 @@ function loadMeta(baseDir: string){
   try {
     const p = path.join(baseDir, 'meta.json')
     const raw = fs.readFileSync(p,'utf8')
-    return JSON.parse(raw) as { restartCount?: number; criticalCount?: number; lastDisconnectCode?: number; lastOpenAt?: number }
+    return JSON.parse(raw) as { 
+      restartCount?: number; 
+      criticalCount?: number; 
+      lastDisconnectCode?: number; 
+      lastOpenAt?: number;
+      everOpened?: boolean;
+    }
   } catch { return {} }
 }
 function saveMeta(sess: Sess){
@@ -371,6 +377,7 @@ function saveMeta(sess: Sess){
       criticalCount: sess.criticalCount||0,
       lastDisconnectCode: sess.lastDisconnectCode||null,
       lastOpenAt: sess.lastOpenAt||null,
+      everOpened: !!sess.everOpened,
       lastState: sess.lastState||null,
       hasQR: !!sess.qrDataUrl,
       updatedAt: Date.now()
@@ -434,10 +441,30 @@ export async function createOrLoadSession(sessionId: string): Promise<void> {
   // load persisted meta if exists
   const meta = loadMeta(baseDir)
   const manual = isManualMode()
-  // Se não há credenciais e não foi solicitado manualmente, não iniciar para não gerar QR automaticamente
-  if(!credsPresent && !manualRequested){
+  
+  // Verificar se sessão foi recentemente limpa (shouldShowQR após limpeza)
+  const wasRecentlyCleared = (
+    (meta.lastDisconnectCode === 401 || meta.lastDisconnectCode === 515) && 
+    (meta.criticalCount || 0) > 0 &&
+    !meta.everOpened // nunca conectou com sucesso
+  )
+  
+  // Log para diagnosticar o problema
+  console.log(`[wa][session-start-decision] ${sessionId}:`, {
+    credsPresent,
+    manualRequested,
+    wasRecentlyCleared,
+    lastDisconnectCode: meta.lastDisconnectCode,
+    criticalCount: meta.criticalCount,
+    everOpened: meta.everOpened,
+    willStart: credsPresent || manualRequested || wasRecentlyCleared
+  })
+  
+  // Se não há credenciais e não foi solicitado manualmente, não iniciar 
+  // EXCETO se a sessão foi recentemente limpa por erro crítico (precisa mostrar QR)
+  if(!credsPresent && !manualRequested && !wasRecentlyCleared){
     const prev = sessions.get(sessionId)
-    sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: prev?.lastState || 'idle', restartCount: meta.restartCount || (current?.restartCount||0), criticalCount: meta.criticalCount || (current?.criticalCount || 0), lastDisconnectCode: meta.lastDisconnectCode, lastOpenAt: meta.lastOpenAt, manualMode: manual, messages: prev?.messages||[] })
+    sessions.set(sessionId, { baseDir, starting: false, qr: null, lastState: prev?.lastState || 'idle', restartCount: meta.restartCount || (current?.restartCount||0), criticalCount: meta.criticalCount || (current?.criticalCount || 0), lastDisconnectCode: meta.lastDisconnectCode, lastOpenAt: meta.lastOpenAt, everOpened: meta.everOpened, manualMode: manual, messages: prev?.messages||[] })
     sessionState.set(sessionId, 'closed')
     try { await supa.from('sessions').upsert({ session_id: sessionId, status: 'closed' }, { onConflict: 'session_id' }) } catch {}
     return
