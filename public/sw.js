@@ -152,6 +152,10 @@ async function cacheFirst(request, cacheName, ttl = null) {
       }
       
       console.log(`💾 SW: Cache hit for ${request.url}`)
+      // Log reduzido - apenas para debug em desenvolvimento
+      if (self.location.hostname === 'localhost') {
+        console.log(`💾 SW: Cache hit for ${request.url}`)
+      }
       return cached
     }
     
@@ -210,7 +214,10 @@ async function networkFirst(request, cacheName, ttl = null) {
           }).catch(err => console.warn('SW: Cache put failed:', err))
         }
         
-        console.log(`🌐 SW: Network response cached for ${request.url}`)
+        // Log reduzido - apenas para debug em desenvolvimento
+        if (self.location.hostname === 'localhost') {
+          console.log(`🌐 SW: Network response cached for ${request.url}`)
+        }
       }
     }
     

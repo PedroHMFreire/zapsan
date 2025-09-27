@@ -1642,7 +1642,7 @@
       }
       
       try {
-        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/connect`, {
+        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/start`, {
           method: 'POST'
         });
         

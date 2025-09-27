@@ -47,11 +47,11 @@ app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', 
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline'; " +
-    "style-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "img-src 'self' data: blob: https:; " +
     "connect-src 'self' wss: ws:; " +
     "media-src 'self' blob:; " +
-    "font-src 'self';"
+    "font-src 'self' https://fonts.gstatic.com;"
   )
   // XSS Protection
   res.setHeader('X-XSS-Protection', '1; mode=block')
