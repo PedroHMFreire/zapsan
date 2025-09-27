@@ -516,7 +516,6 @@
   </div>
 
   <script src="/security-utils.js"></script>
-  <script src="/login-utils.js"></script>
   <script>
     // Application state
     let isLoginMode = true
@@ -627,16 +626,16 @@
       
       switch (type) {
         case 'email':
-          isValid = window.loginUtils.validateEmail(value)
+          isValid = validateEmail(value)
           break
         case 'password':
-          isValid = window.loginUtils.validatePassword(value)
+          isValid = value.length >= 8
           break
         case 'name':
-          isValid = window.loginUtils.validateName(value)
+          isValid = value.length >= 2
           break
         case 'confirmPassword':
-          isValid = value === passwordInput.value && value.length > 0
+          isValid = value === passwordInput.value
           break
       }
       
@@ -649,7 +648,7 @@
     }
 
     function validateEmail(email) {
-      return window.loginUtils.validateEmail(email)
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 255
     }
 
     function clearValidationStates() {
@@ -682,9 +681,8 @@
       }
       
       // Rate limiting
-      const rateCheck = window.loginUtils.checkRateLimit('auth')
-      if (!rateCheck.allowed) {
-        const remaining = Math.ceil((rateCheck.resetTime - Date.now()) / 1000)
+      if (!rateLimiter.canMakeRequest('auth')) {
+        const remaining = Math.ceil(rateLimiter.getRemainingTime('auth') / 1000)
         showAlert(`Muitas tentativas. Aguarde ${remaining}s`, 'error')
         return
       }
@@ -693,18 +691,17 @@
       
       try {
         const payload = {
-          email: window.loginUtils.sanitizeInput(emailInput.value.trim(), 255),
+          email: sanitizeInput(emailInput.value.trim(), 'email'),
           password: passwordInput.value
         }
         
         if (!isLoginMode) {
-          payload.name = window.loginUtils.sanitizeInput(nameInput.value.trim(), 100)
+          payload.name = sanitizeInput(nameInput.value.trim(), 'name')
           payload.confirm = confirmPasswordInput.value
         }
         
-        // Additional security validation using loginUtils
-        if (payload.email.length > window.loginUtils.CONFIG.MAX_EMAIL_LENGTH || 
-            payload.password.length > window.loginUtils.CONFIG.MAX_PASSWORD_LENGTH) {
+        // Additional security validation
+        if (payload.email.length > 255 || payload.password.length > 128) {
           throw new Error('Dados muito longos')
         }
         

@@ -136,23 +136,61 @@
   form.addEventListener('submit', async (e)=>{
     e.preventDefault()
     clearErr()
+    
+    // Sanitizar inputs antes da validação
+    const emailValue = (email.value || '').trim().toLowerCase();
+    const passValue = pass.value || '';
+    const nameValue = (regName?.value || '').trim();
+    
+    // Validação básica de segurança
+    if (emailValue.length > 255 || passValue.length > 128) {
+      showErr('Dados muito longos.');
+      return;
+    }
+    
+    // Verificar caracteres perigosos
+    if (/[<>'"&]/.test(emailValue) || /[<>]/.test(nameValue)) {
+      showErr('Caracteres inválidos detectados.');
+      return;
+    }
+    
     const vEmail = validateEmail()
     const vPass = validatePassword()
     const vName = validateName()
     const vPass2 = validatePassword2()
+    
     if(!(vEmail && vPass && vName && vPass2)){
       showErr('Corrija os campos destacados.')
       return
     }
+    
     const mode = form.dataset.mode
+    
     try {
       setLoading(true)
-          const payload = { email: (email.value||'').trim().toLowerCase(), password: pass.value }
-      if(mode==='register') payload.confirm = pass2.value
-      if(mode==='register' && regName.value.trim()) payload.name = regName.value.trim()
+      const payload = { 
+        email: emailValue, 
+        password: passValue 
+      }
+      if(mode==='register') {
+        payload.confirm = pass2?.value || '';
+        if(nameValue) payload.name = nameValue;
+      }
+      
       let endpoint = mode==='register' ? '/auth/register' : '/auth/login'
-      const r = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
-      if(!r.ok){ const j= await r.json().catch(()=>({})); showErr('Falha '+(mode==='register'?'no registro':'no login')+': '+(j.error||r.status)); return }
+      const r = await fetch(endpoint, { 
+        method:'POST', 
+        headers:{'Content-Type':'application/json'}, 
+        body: JSON.stringify(payload) 
+      })
+      
+      if(!r.ok){ 
+        const j = await r.json().catch(()=>({})); 
+        const errorMsg = j.message || j.error || `Erro ${r.status}`;
+        showErr(`Falha ${mode==='register'?'no registro':'no login'}: ${errorMsg}`); 
+        return;
+      }
+      
       const j = await r.json()
       try {
         localStorage.setItem('auth','ok')

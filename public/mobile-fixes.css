@@ -7,6 +7,12 @@ html, body {
   box-sizing: border-box;
   height: 100vh;
   overflow-y: hidden; /* Remove scroll da página principal */
+  font-size: 16px; /* Previne zoom no iOS */
+}
+
+/* Prevent zoom on input focus (iOS) */
+input, textarea, select {
+  font-size: 16px !important;
 }
 
 *, *::before, *::after {
@@ -17,6 +23,38 @@ html, body {
 .container, .app, .topbar-inner {
   max-width: 100%;
   min-width: 0;
+}
+
+/* 🔧 FIX: Inputs - better mobile experience */
+.input, input, textarea {
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 16px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.input:focus, input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--wa-accent);
+  box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.2);
+}
+
+/* 🔧 FIX: Buttons - better touch targets */
+.btn, button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn:active, button:active {
+  transform: scale(0.98);
 }
 
 /* 🔧 FIX: Topbar alignment and responsive layout */

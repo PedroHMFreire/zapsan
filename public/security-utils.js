@@ -3,7 +3,7 @@
  */
 
 // Sanitização de HTML para prevenir XSS
-export function sanitizeHtml(html) {
+function sanitizeHtml(html) {
   // Criar elemento temporário para escape
   const temp = document.createElement('div');
   temp.textContent = html;
@@ -11,7 +11,7 @@ export function sanitizeHtml(html) {
 }
 
 // Escapar caracteres especiais
-export function escapeHtml(text) {
+function escapeHtml(text) {
   if (typeof text !== 'string') return text;
   
   const map = {
@@ -27,7 +27,7 @@ export function escapeHtml(text) {
 }
 
 // Validação de entrada
-export function validateInput(input, type = 'text', maxLength = 1000) {
+function validateInput(input, type = 'text', maxLength = 1000) {
   if (typeof input !== 'string') return false;
   if (input.length > maxLength) return false;
   
@@ -88,16 +88,16 @@ class ClientRateLimit {
 }
 
 // Instância global de rate limiting
-export const rateLimiter = new ClientRateLimit(20, 60000); // 20 tentativas por minuto
+const rateLimiter = new ClientRateLimit(20, 60000); // 20 tentativas por minuto
 
 // Função segura para inserir conteúdo no DOM
-export function safeSetInnerHTML(element, content) {
+function safeSetInnerHTML(element, content) {
   if (!element || typeof content !== 'string') return;
   element.textContent = content; // Usar textContent ao invés de innerHTML
 }
 
 // Função segura para inserir HTML (quando necessário)
-export function safeSetHTML(element, html) {
+function safeSetHTML(element, html) {
   if (!element || typeof html !== 'string') return;
   
   // Sanitizar antes de inserir
@@ -106,7 +106,7 @@ export function safeSetHTML(element, html) {
 }
 
 // Validação de URL para evitar redirecionamentos maliciosos
-export function validateUrl(url) {
+function validateUrl(url) {
   if (typeof url !== 'string') return false;
   
   try {
@@ -119,7 +119,7 @@ export function validateUrl(url) {
 }
 
 // Função para log seguro (evitar vazamento de dados sensíveis)
-export function safeLog(message, data = {}) {
+function safeLog(message, data = {}) {
   if (typeof message !== 'string') return;
   
   // Sanitizar dados sensíveis

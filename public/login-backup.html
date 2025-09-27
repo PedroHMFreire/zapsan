@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>ZapSan ⚡ Acesso</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/mobile-fixes.css" />
+  <style>
+  /* Layout responsivo dedicado ao login */
+  body { min-height:100dvh; display:flex; flex-direction:column; background:var(--wa-bg); overflow-y:auto; }
+  .login-wrapper { flex:1; display:flex; flex-direction:column; justify-content:center; padding:clamp(20px,5vh,48px) clamp(16px,4vw,32px); overflow-y:auto; }
+  .login-card { width:100%; max-width:400px; margin:0 auto; position:relative; animation:cardIn .5s ease; }
+  .pass-wrap{position:relative;display:flex;align-items:center}
+  .toggle-pass{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:12px;padding:4px}
+  .toggle-pass:focus-visible{outline:2px solid var(--wa-accent);border-radius:6px}
+  .theme-toggle{position:absolute;top:10px;right:12px;background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;opacity:.7;transition:opacity .2s,transform .2s}
+  .theme-toggle:hover,.theme-toggle:focus-visible{opacity:1;transform:scale(1.06)}
+  .tab-btn{flex:1;background:var(--wa-panel);border:1px solid var(--wa-border);padding:8px 10px;border-radius:8px;font-size:12px;cursor:pointer;color:var(--muted);transition:.2s}
+  .tab-btn[aria-selected="true"]{background:var(--wa-accent);color:#041e11;border-color:var(--wa-accent);font-weight:600}
+  .tab-btn:focus-visible{outline:2px solid var(--wa-accent); outline-offset:2px}
+  @keyframes cardIn {from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+  .login-card form .input{max-width:100%; box-sizing:border-box;}
+  .login-card form .field{width:100%;}
+  .login-card .field input.input{width:100%;}
+  .brand-logo { display:none; }
+    form { display:flex; flex-direction:column; gap:16px; margin-top:12px; }
+    .field { display:flex; flex-direction:column; gap:6px; }
+    .field label { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; font-weight:600; color:var(--muted); }
+    .field.inline { flex-direction:row; align-items:center; gap:8px; }
+    .muted-link { font-size:12px; text-align:right; margin-top:2px; }
+    .muted-link a { color:var(--muted); }
+    .muted-link a:hover { color:var(--wa-accent); }
+  .error-box { display:none; background:#301b1b; border:1px solid #5e2727; color:#fca5a5; padding:10px 12px; border-radius:10px; font-size:12px; line-height:1.3; }
+  .error-box.show { display:block; animation:fadeIn .3s ease; }
+  .mode-switch { display:flex; gap:6px; margin-bottom:4px; }
+  .mode-switch button { font-weight:500; }
+  .field.valid input { border-color: #2e7d32; }
+  .field.invalid input { border-color: #c62828; }
+  .field-msg { font-size:11px; margin-top:2px; color:var(--muted); }
+  .field.invalid .field-msg { color:#ef5350; }
+  .field.valid .field-msg { color:#69e4a6; }
+  .pw-meter { display:none; width:100%; height:6px; background:var(--wa-panel); border-radius:4px; position:relative; overflow:hidden; margin-top:-4px; }
+  .pw-meter-bar { position:absolute; top:0; left:0; height:100%; width:0%; background:linear-gradient(90deg,#ef5350,#ffca28,#69e4a6); transition:width .25s ease; }
+  .pw-meter-label { font-size:11px; margin-top:4px; opacity:.75; }
+  .btn.loading { position:relative; }
+  .btn.loading .spinner { width:14px; height:14px; border:2px solid rgba(255,255,255,.4); border-top-color:#fff; border-radius:50%; display:inline-block; animation:spin .6s linear infinite; margin-right:6px; }
+  @keyframes spin {to{transform:rotate(360deg)}}
+  #theme-toggle { position:absolute; top:10px; right:12px; background:transparent; border:0; color:var(--muted); cursor:pointer; font-size:18px; line-height:1; opacity:.7; transition:opacity .2s,transform .2s }
+  #theme-toggle:hover,#theme-toggle:focus-visible{opacity:1;transform:scale(1.06)}
+    .help-text { font-size:12px; color:var(--muted); margin-top:-4px; }
+    .btn[disabled] { opacity:.6; cursor:not-allowed; }
+    .footer-note { margin-top:32px; text-align:center; font-size:11px; color:var(--muted); opacity:.65; }
+    @media (min-width:580px){ .brand-logo{ font-size:22px; } }
+    @media (max-width:420px){
+      .login-card { padding:4px 0; }
+      .brand-logo{ font-size:18px; }
+    }
+    @media (prefers-reduced-motion:no-preference){
+      @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+    }
+    /* High-contrast focus rings explicit */
+    .input:focus-visible, button:focus-visible { outline:2px solid var(--wa-accent); outline-offset:2px; }
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="topbar-inner" style="justify-content:center;gap:8px;font-weight:600;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12c4-6 12-6 16 0-4 6-12 6-16 0Z" stroke="currentColor" stroke-width="2"/></svg>
+    <span>ZapSan</span>
+  </div></header>
+  <main class="login-wrapper">
+    <div class="card login-card" aria-labelledby="login-title">
+  <button id="theme-toggle" type="button" aria-label="Alternar tema"></button>
+  <p id="login-title" style="margin:0 0 14px; font-size:14px; opacity:.9; text-align:center;font-weight:500">Acesse sua conta ou crie uma nova.</p>
+      <div class="error-box" id="err-box" role="alert" aria-hidden="true"></div>
+      <div class="mode-switch" role="tablist" aria-label="Alternar modo">
+        <button type="button" class="tab-btn" data-mode-tab="login" role="tab" aria-selected="true">Entrar</button>
+        <button type="button" class="tab-btn" data-mode-tab="register" role="tab" aria-selected="false">Criar conta</button>
+      </div>
+      <form id="login-form" autocomplete="on" data-mode="login" novalidate>
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="voce@empresa.com" autocomplete="email" class="input" required />
+          <div class="help-text" id="email-help">Use seu email corporativo.</div>
+        </div>
+        <div class="field">
+          <label for="password">Senha</label>
+          <div class="pass-wrap">
+            <input id="password" type="password" placeholder="••••" class="input" required aria-describedby="pass-help" />
+            <button type="button" class="toggle-pass" id="btn-pass" aria-label="Mostrar senha">👁</button>
+          </div>
+          <div class="help-text" id="pass-help">Mínimo 6 caracteres.</div>
+          <div class="pw-meter" id="pw-meter" aria-hidden="true">
+            <div class="pw-meter-bar" id="pw-meter-fill"></div>
+          </div>
+          <div class="pw-meter-label" id="pw-meter-label" aria-live="polite"></div>
+        </div>
+        <div id="register-extra" style="display:none;flex-direction:column;gap:16px;">
+          <div class="field">
+            <label for="reg-name">Nome</label>
+            <input id="reg-name" type="text" placeholder="Seu nome" autocomplete="name" class="input" />
+          </div>
+          <div class="field" id="confirm-wrap">
+            <label for="password2">Confirmar senha</label>
+            <div class="pass-wrap">
+              <input id="password2" type="password" placeholder="Repetir senha" class="input" aria-describedby="confirm-help" />
+            </div>
+            <div class="help-text" id="confirm-help">Repita a senha para confirmar.</div>
+          </div>
+        </div>
+        <!-- Campos de workspace e captcha removidos -->
+        <div class="field inline">
+          <input type="checkbox" id="remember" style="width:auto;" />
+          <label for="remember" style="margin:0;font-size:12px;cursor:pointer;">Lembrar-me</label>
+        </div>
+  <button class="btn" id="btn-login" type="submit">Entrar</button>
+        <div class="muted-link" style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+          <a href="#" onclick="alert('Recuperação de senha em breve');return false;">Esqueci a senha</a>
+          <span style="opacity:.6;font-size:11px;">Suporte em breve</span>
+        </div>
+      </form>
+  <div class="footer-note">ZapSan • Versão demonstrativa • Credenciais não persistem</div>
+    </div>
+  </main>
+  <script src="/login.js" defer></script>
+</body>
+</html>

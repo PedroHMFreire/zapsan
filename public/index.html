@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -10,2260 +10,2244 @@
   <title>ZapSan ⚡ WhatsApp Business</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/mobile-enhancements.css" />
-  <link rel="stylesheet" href="/mobile-fixes.css" />
-  <script>(function(){
-    try {
-      const onLogin = location.pathname.endsWith('/login.html');
-      const hasFlag = localStorage.getItem('auth')==='ok';
-      // Hidratar session_id a partir da URL, se presente (deep-link/share)
-      try {
-        const u = new URL(window.location.href);
-        const sidQ = u.searchParams.get('session_id');
-        if(sidQ){
-          localStorage.setItem('session_id', sidQ);
-          if(!localStorage.getItem('sessionId')) localStorage.setItem('sessionId', sidQ);
-        }
-      } catch {}
-      // Se já temos session_id no storage e não está na URL, refletir imediatamente
-      try {
-        const sid = localStorage.getItem('session_id') || localStorage.getItem('sessionId');
-        if(sid){
-          const u = new URL(window.location.href);
-          if(u.searchParams.get('session_id') !== sid){
-            u.searchParams.set('session_id', sid);
-            history.replaceState(null, '', u.toString());
-          }
-        }
-      } catch {}
-      // Shim: garantir chave legacy session_id usando sessionId se existir
-      try { const sid = localStorage.getItem('sessionId'); if(sid && !localStorage.getItem('session_id')) localStorage.setItem('session_id', sid); } catch {}
-      if(onLogin && hasFlag){ location.replace('/'); return; }
-      if(!hasFlag){
-        // tentativa silenciosa de validar cookie/sessão; se falhar, força login
-        fetch('/me/profile',{method:'GET'}).then(r=>{
-          if(r.status===401){ if(!onLogin) location.replace('/login.html'); }
-          else if(r.ok){ if(onLogin) location.replace('/'); else localStorage.setItem('auth','ok'); }
-          else { if(!onLogin) location.replace('/login.html'); }
-        }).catch(()=>{ if(!onLogin) location.replace('/login.html'); });
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #25D366;
+      --primary-dark: #128C7E;
+      --background: #0d1418;
+      --surface: #1a1f23;
+      --surface-variant: #252d31;
+      --on-surface: #e8eaed;
+      --on-surface-variant: #9ca3a8;
+      --outline: #3c4347;
+      --online: #4ade80;
+      --offline: #6b7280;
+      --danger: #f87171;
+      --font: 'Inter', system-ui, sans-serif;
+      --radius: 12px;
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      --border: 1px solid var(--outline);
+    }
+
+    [data-theme="light"] {
+      --background: #f8fafc;
+      --surface: #ffffff;
+      --surface-variant: #f1f5f9;
+      --on-surface: #1e293b;
+      --on-surface-variant: #64748b;
+      --outline: #e2e8f0;
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--background);
+      color: var(--on-surface);
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Layout principal */
+    .app {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      height: 100vh;
+      transition: all 0.3s ease;
+    }
+
+    /* Header minimalista */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      background: var(--surface);
+      border-bottom: var(--border);
+      backdrop-filter: blur(10px);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .logo-icon {
+      width: 24px;
+      height: 24px;
+      background: var(--primary);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dropdown {
+      position: relative;
+      display: inline-block;
+    }
+
+    .dropdown-menu {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      background: var(--surface);
+      border: var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-width: 160px;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-8px);
+      transition: all 0.2s ease;
+    }
+
+    .dropdown.active .dropdown-menu {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    .menu-item {
+      width: 100%;
+      padding: 12px 16px;
+      border: none;
+      background: none;
+      color: var(--on-surface);
+      font-size: 14px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .menu-item:hover {
+      background: var(--surface-variant);
+    }
+
+    .menu-item:first-child {
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+
+    .menu-item:last-child {
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: 8px;
+      background: none;
+      color: var(--on-surface-variant);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      font-size: 16px;
+    }
+
+    .icon-btn:hover {
+      background: var(--surface-variant);
+      color: var(--on-surface);
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--on-surface-variant);
+      background: var(--surface-variant);
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--offline);
+      transition: all 0.2s ease;
+    }
+
+    .status-dot.online {
+      background: var(--online);
+      box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
+    }
+
+    .profile-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .profile-btn:hover {
+      transform: scale(1.05);
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--surface);
+      border-right: var(--border);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .search-container {
+      padding: 16px 20px;
+      border-bottom: var(--border);
+    }
+
+    .search-input {
+      width: 100%;
+      height: 40px;
+      background: var(--surface-variant);
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      padding: 0 16px 0 40px;
+      font-size: 14px;
+      color: var(--on-surface);
+      transition: all 0.2s ease;
+    }
+
+    .search-input::placeholder {
+      color: var(--on-surface-variant);
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.1);
+    }
+
+    .search-container {
+      position: relative;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 32px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 14px;
+      color: var(--on-surface-variant);
+    }
+
+    /* Filtros */
+    .filters {
+      display: flex;
+      gap: 8px;
+      padding: 12px 20px 8px;
+      border-bottom: var(--border);
+    }
+
+    .chip {
+      padding: 6px 12px;
+      border: 1px solid var(--outline);
+      border-radius: 16px;
+      background: none;
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .chip:hover {
+      background: var(--surface-variant);
+    }
+
+    .chip.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    /* Lista de conversas */
+    .chat-list {
+      flex: 1;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+
+    .chat-list::-webkit-scrollbar {
+      display: none;
+    }
+
+    /* Bottom Navigation */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: var(--surface);
+      border-top: var(--border);
+      display: none;
+      align-items: center;
+      justify-content: space-around;
+      z-index: 50;
+    }
+
+    .bottom-nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      text-decoration: none;
+      color: var(--on-surface-variant);
+      font-size: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+      min-width: 60px;
+    }
+
+    .bottom-nav-item:hover,
+    .bottom-nav-item.active {
+      color: var(--primary);
+      background: rgba(37, 211, 102, 0.1);
+    }
+
+    .bottom-nav-item .icon {
+      font-size: 18px;
+    }
+
+    .chat-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border-bottom: 1px solid var(--outline);
+      background: transparent;
+    }
+
+    .chat-item:hover {
+      background: var(--surface-variant);
+    }
+
+    .chat-item.active {
+      background: var(--primary);
+      color: white;
+    }
+
+    .chat-item.active .chat-subtitle,
+    .chat-item.active .chat-time {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .chat-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--surface-variant);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 16px;
+      color: var(--on-surface-variant);
+      flex-shrink: 0;
+    }
+
+    .chat-meta {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 2px;
+    }
+
+    .chat-name {
+      font-weight: 500;
+      font-size: 15px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-time {
+      font-size: 12px;
+      color: var(--on-surface-variant);
+      white-space: nowrap;
+    }
+
+    .chat-subtitle {
+      font-size: 13px;
+      color: var(--on-surface-variant);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .unread-badge {
+      background: var(--primary);
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+      min-width: 18px;
+      text-align: center;
+    }
+
+    /* Área do chat */
+    .chat-area {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: var(--background);
+    }
+
+    .chat-header {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      background: var(--surface);
+      border-bottom: var(--border);
+      backdrop-filter: blur(10px);
+    }
+
+    /* Chat header */
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      background: var(--surface);
+      border-bottom: var(--border);
+      backdrop-filter: blur(10px);
+    }
+
+    .chat-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .chat-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .current-chat-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--surface-variant);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .current-chat-info {
+      min-width: 0;
+    }
+
+    .current-chat-info h3 {
+      font-size: 16px;
+      font-weight: 500;
+      margin: 0 0 2px 0;
+    }
+
+    /* Mensagens */
+    .messages-container {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--outline) transparent;
+    }
+
+    .message {
+      display: flex;
+      margin-bottom: 16px;
+      max-width: 70%;
+    }
+
+    .message.outgoing {
+      align-self: flex-end;
+      margin-left: auto;
+      flex-direction: row-reverse;
+    }
+
+    .message-bubble {
+      background: var(--surface);
+      padding: 12px 16px;
+      border-radius: 18px;
+      max-width: 100%;
+      position: relative;
+    }
+
+    .message.outgoing .message-bubble {
+      background: var(--primary);
+      color: white;
+    }
+
+    .message-text {
+      font-size: 14px;
+      line-height: 1.4;
+      word-wrap: break-word;
+    }
+
+    .message-time {
+      font-size: 11px;
+      color: var(--on-surface-variant);
+      margin-top: 4px;
+      text-align: right;
+    }
+
+    .message.outgoing .message-time {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    /* Composer */
+    .composer {
+      padding: 16px 20px;
+      background: var(--surface);
+      border-top: var(--border);
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+    }
+
+    .composer-wrapper {
+      flex: 1;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      background: var(--surface-variant);
+      border: 1px solid var(--outline);
+      border-radius: 22px;
+      padding: 8px 12px;
+    }
+
+    .attach-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: 50%;
+      background: none;
+      color: var(--on-surface-variant);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: all 0.2s ease;
+    }
+
+    .attach-btn:hover {
+      background: var(--outline);
+    }
+
+    .composer-input {
+      flex: 1;
+      min-height: 20px;
+      max-height: 120px;
+      background: none;
+      border: none;
+      font-size: 14px;
+      font-family: inherit;
+      color: var(--on-surface);
+      resize: none;
+      outline: none;
+    }
+
+    .composer-input::placeholder {
+      color: var(--on-surface-variant);
+    }
+
+
+
+    .send-btn {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .send-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+    }
+
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Estado vazio */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .empty-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .empty-title {
+      font-size: 18px;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    .empty-subtitle {
+      color: var(--on-surface-variant);
+      font-size: 14px;
+    }
+
+    /* Floating Action Button */
+    .fab {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 56px;
+      height: 56px;
+      border: none;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      z-index: 100;
+    }
+
+    .fab:hover {
+      transform: scale(1.05);
+      box-shadow: 0 8px 24px rgba(37, 211, 102, 0.4);
+    }
+
+    /* Modal */
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .modal.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal-content {
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      width: 90%;
+      max-width: 480px;
+      max-height: 80vh;
+      overflow: hidden;
+      transform: scale(0.9);
+      transition: all 0.3s ease;
+    }
+
+    .modal.active .modal-content {
+      transform: scale(1);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: var(--border);
+    }
+
+    .modal-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .modal-footer {
+      display: flex;
+      gap: 12px;
+      padding: 16px 20px;
+      border-top: var(--border);
+      justify-content: flex-end;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn.primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn.outline {
+      background: none;
+      border: 1px solid var(--outline);
+      color: var(--on-surface);
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .close-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 6px;
+      background: none;
+      color: var(--on-surface-variant);
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .close-btn:hover {
+      background: var(--surface-variant);
+    }
+
+    /* Drawer */
+    .drawer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .drawer.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .drawer-panel {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 90%;
+      max-width: 400px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      transform: translateX(100%);
+      transition: all 0.3s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .drawer.active .drawer-panel {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: var(--border);
+    }
+
+    .drawer-body {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .drawer-footer {
+      padding: 16px 20px;
+      border-top: var(--border);
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--on-surface);
+    }
+
+    .field input,
+    .field textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--outline);
+      border-radius: 8px;
+      background: var(--surface-variant);
+      color: var(--on-surface);
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+
+    .field input:focus,
+    .field textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.1);
+    }
+
+    .help {
+      font-size: 12px;
+      color: var(--on-surface-variant);
+      margin-top: 4px;
+    }
+
+    .section {
+      margin-bottom: 20px;
+    }
+
+    .section:last-child {
+      margin-bottom: 0;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Mobile adaptations */
+    @media (max-width: 768px) {
+      .app {
+        grid-template-columns: 1fr;
+        position: relative;
       }
-    } catch {}
-  })();</script>
+
+      .sidebar {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        z-index: 10;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+      }
+
+      .app.sidebar-open .sidebar {
+        transform: translateX(0);
+      }
+
+      .chat-area {
+        width: 100%;
+      }
+
+      .header {
+        display: none;
+      }
+
+      .fab {
+        bottom: 80px;
+      }
+
+      .bottom-nav {
+        display: flex;
+      }
+
+      .chat-area {
+        padding-bottom: 60px;
+      }
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message {
+      animation: fadeIn 0.3s ease;
+    }
+
+    /* Focus styles */
+    .search-input:focus-visible,
+    .composer-input:focus-visible,
+    .send-btn:focus-visible,
+    .profile-btn:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+
+    /* Loading skeleton */
+    .skeleton {
+      background: linear-gradient(90deg, var(--surface-variant) 25%, var(--outline) 50%, var(--surface-variant) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: var(--radius);
+    }
+
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    .chat-skeleton {
+      height: 64px;
+      margin: 8px 16px;
+    }
+  </style>
+  <script>
+    // Auth check minimalista
+    (function() {
+      try {
+        const hasAuth = localStorage.getItem('auth') === 'ok';
+        if (!hasAuth) {
+          window.location.replace('/login.html');
+          return;
+        }
+        
+        // Sync session_id from URL
+        const params = new URLSearchParams(location.search);
+        const sessionId = params.get('session_id');
+        if (sessionId) {
+          localStorage.setItem('session_id', sessionId);
+          localStorage.setItem('sessionId', sessionId);
+        }
+      } catch (e) {
+        window.location.replace('/login.html');
+      }
+    })();
+  </script>
 </head>
 <body>
-  <header class="topbar"><div class="topbar-inner">
-    <div class="top-left">
-      <div class="dropdown dropdown-left" id="hamb-menu">
-        <button type="button" class="icon-btn icon-menu" id="hamb-btn" aria-label="Menu" aria-expanded="false"></button>
-        <div class="dropdown-menu" role="menu" id="hamb-content">
-          <button type="button" class="menu-item" id="menu-flow" role="menuitem">Fluxo IA</button>
-          <button type="button" class="menu-item" id="menu-schedule" role="menuitem">Agendar envios</button>
-          <button type="button" class="menu-item" id="menu-tags" role="menuitem">Etiquetas</button>
-        </div>
-      </div>
-    </div>
-    <div class="brand icon-whatsapp">ZapSan</div>
-    <div class="top-right">
-      <button type="button" class="icon-btn" id="theme-toggle" aria-label="Alternar tema" title="Tema"></button>
-      <div class="badge icon-status" id="svc-badge">Carregando…</div>
-      <button type="button" class="m-btn icon-user" id="profile-btn" aria-haspopup="dialog" title="Perfil"></button>
-    </div>
-  </div></header>
-
   <div class="app" id="app">
-    <aside class="sidebar">
-      <div class="s-header">
-        <div class="brand" style="font-size:15px">Conversas</div>
-  <div class="actions"><button type="button" class="icon-btn icon-user" id="new-chat" aria-label="Nova conversa">
-    <span class="btn-text">+</span>
-  </button></div>
-      </div>
-      <div class="s-search"><input class="input" id="search" placeholder="Pesquisar conversas…"></div>
-      <div class="s-filters">
-        <button class="chip is-active" data-filter="all">Todos</button>
-        <button class="chip" data-filter="unread">Não lidas</button>
-        <button class="chip" data-filter="starred">Com estrela</button>
-      </div>
-      <div class="chat-list" id="chat-list"></div>
-    </aside>
-
-    <section class="chat">
-      <div class="c-header">
-        <div class="peer">
-          <button type="button" class="icon-btn" id="back" style="display:none" aria-label="Voltar">←</button>
-          <div class="avatar"></div>
-          <div class="meta">
-            <div class="name" id="peer-name">Selecione uma conversa</div>
-            <div class="status" id="online-badge">—</div>
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="dropdown" id="hambMenu">
+          <button class="icon-btn" id="hambBtn" title="Menu">☰</button>
+          <div class="dropdown-menu">
+            <button class="menu-item" id="menuFlow">🤖 Fluxo IA</button>
+            <button class="menu-item" id="menuSchedule">⏰ Agendar envios</button>
+            <button class="menu-item" id="menuTags">🏷️ Etiquetas</button>
+            <button class="menu-item" id="menuContacts">📞 Contatos</button>
+            <button class="menu-item" id="menuSettings">⚙️ Configurações</button>
           </div>
         </div>
-        <div class="actions">
-          <button type="button" class="icon-btn" id="chat-search" aria-label="Buscar na conversa">🔍</button>
-          <button type="button" class="icon-btn" id="chat-info" aria-label="Informações da conversa">ℹ️</button>
+        <div class="logo">
+          <div class="logo-icon">⚡</div>
+          <span>ZapSan</span>
         </div>
       </div>
-      <div class="c-messages" id="messages"></div>
-    <form class="c-composer" id="composer">
-  <button type="button" class="icon-btn" id="attach" aria-label="Anexar arquivo">📎</button>
-  <div class="input-wrapper">
-    <textarea class="input" id="text" placeholder="Escreva uma mensagem…" aria-label="Mensagem" rows="1" style="resize:none;overflow:hidden"></textarea>
-    <div class="composer-actions">
-      <button type="button" class="icon-btn" id="emoji" aria-label="Emoji" title="Emoji">😊</button>
-      <button type="submit" class="send-btn" id="send" aria-label="Enviar mensagem" title="Enviar">
-        <span>➤</span>
-      </button>
-    </div>
-  </div>
-    </form>
-    </section>
+      <div class="header-actions">
+        <button class="icon-btn" id="themeToggle" title="Alternar tema">🌙</button>
+        <div class="status-indicator">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Conectando...</span>
+        </div>
+        <button class="profile-btn" id="profileBtn" title="Perfil">
+          👤
+        </button>
+      </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="search-container">
+        <div class="search-icon">🔍</div>
+        <input 
+          type="text" 
+          class="search-input" 
+          placeholder="Pesquisar conversas..."
+          id="searchInput"
+        />
+      </div>
+      
+      <div class="filters">
+        <button class="chip active" data-filter="all">Todos</button>
+        <button class="chip" data-filter="unread">Não lidas</button>
+        <button class="chip" data-filter="starred">⭐</button>
+      </div>
+      
+      <div class="chat-list" id="chatList">
+        <!-- Lista de conversas será preenchida via JavaScript -->
+        <div class="chat-skeleton skeleton"></div>
+        <div class="chat-skeleton skeleton"></div>
+        <div class="chat-skeleton skeleton"></div>
+      </div>
+    </aside>
+
+    <!-- Chat Area -->
+    <main class="chat-area">
+      <div id="chatHeader" class="chat-header" style="display: none;">
+        <div class="chat-header-left">
+          <button class="icon-btn" id="backBtn" style="display: none;">←</button>
+          <div class="current-chat-avatar" id="currentAvatar">?</div>
+          <div class="current-chat-info">
+            <h3 id="currentName">Nome do contato</h3>
+            <div class="current-chat-status" id="currentStatus">Online</div>
+          </div>
+        </div>
+        <div class="chat-header-actions">
+          <button class="icon-btn" id="chatSearch" title="Buscar na conversa">🔍</button>
+          <button class="icon-btn" id="chatInfo" title="Informações">ℹ️</button>
+        </div>
+      </div>
+
+      <div class="messages-container" id="messagesContainer">
+        <div class="empty-state">
+          <div class="empty-icon">💬</div>
+          <div class="empty-title">Bem-vindo ao ZapSan</div>
+          <div class="empty-subtitle">Selecione uma conversa para começar</div>
+        </div>
+      </div>
+
+      <form class="composer" id="composer" style="display: none;">
+        <div class="composer-wrapper">
+          <button type="button" class="attach-btn" id="attachBtn" title="Anexar">📎</button>
+          <textarea 
+            class="composer-input" 
+            id="messageInput"
+            placeholder="Escreva uma mensagem..."
+            rows="1"
+          ></textarea>
+          <button type="button" class="attach-btn" id="emojiBtn" title="Emoji">😊</button>
+        </div>
+        <button type="submit" class="send-btn" id="sendBtn">
+          ➤
+        </button>
+      </form>
+    </main>
   </div>
 
-  <!-- Bottom Navigation for Mobile -->
-  <nav class="bottom-nav" id="bottom-nav">
+  <!-- Floating Action Button -->
+  <button class="fab" id="newChatBtn" title="Nova conversa">
+    ✏️
+  </button>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav" id="bottomNav">
     <a href="#" class="bottom-nav-item active" data-nav="chats">
       <span class="icon">💬</span>
       <span>Chats</span>
-    </a>
-    <a href="#" class="bottom-nav-item" data-nav="status">
-      <span class="icon">📸</span>
-      <span>Status</span>
-    </a>
-    <a href="#" class="bottom-nav-item" data-nav="schedule">
-      <span class="icon">⏰</span>
-      <span>Agendar</span>
     </a>
     <a href="#" class="bottom-nav-item" data-nav="contacts">
       <span class="icon">📞</span>
       <span>Contatos</span>
     </a>
+    <a href="#" class="bottom-nav-item" data-nav="schedule">
+      <span class="icon">⏰</span>
+      <span>Agendar</span>
+    </a>
+    <a href="#" class="bottom-nav-item" data-nav="ai">
+      <span class="icon">🤖</span>
+      <span>IA</span>
+    </a>
   </nav>
 
-  <!-- Drawer Perfil -->
-  <div class="drawer" id="drw-profile">
-    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="profile-title">
-      <div class="drawer-h">
-        <h3 id="profile-title" style="margin:0">Perfil</h3>
-        <button class="icon-btn" data-close-profile aria-label="Fechar">✖</button>
+  <!-- Modal Nova Conversa -->
+  <div class="modal" id="newChatModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Nova Conversa</h3>
+        <button class="close-btn" data-close="newChatModal">×</button>
       </div>
-      <div class="drawer-b" id="profile-body">
+      <div class="modal-body">
+        <form id="newChatForm">
+          <div class="field">
+            <label for="phoneInput">Número do telefone:</label>
+            <input type="text" id="phoneInput" placeholder="+55 11 99999-9999" maxlength="20">
+            <div class="help">Digite o número completo com DDD</div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn outline" data-close="newChatModal">Cancelar</button>
+        <button class="btn primary" id="createChatBtn">Iniciar Conversa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawer Perfil -->
+  <div class="drawer" id="profileDrawer">
+    <div class="drawer-panel">
+      <div class="drawer-header">
+        <h3>Perfil</h3>
+        <button class="close-btn" data-close="profileDrawer">×</button>
+      </div>
+      <div class="drawer-body">
         <div class="section">
-          <strong>Usuário:</strong> <span id="pf-user">—</span><br/>
-          <strong>Session ID:</strong> <span id="pf-session">—</span>
+          <strong>Usuário:</strong> <span id="pfUser">—</span><br/>
+          <strong>Session ID:</strong> <span id="pfSession">—</span>
         </div>
         <div class="section">
-          <strong>Plano:</strong> <span id="pf-plan">—</span><br/>
-          <small>Uso diário: <span id="pf-usage-today">0</span>/<span id="pf-quota">0</span></small><br/>
-          <small>Total: <span id="pf-usage-total">0</span></small>
+          <strong>Plano:</strong> <span id="pfPlan">—</span><br/>
+          <small>Uso diário: <span id="pfUsageToday">0</span>/<span id="pfQuota">0</span></small><br/>
+          <small>Total: <span id="pfUsageTotal">0</span></small>
         </div>
         <div class="section">
           <strong>Conexão</strong>
-          <div class="row" style="margin-top:6px"><span class="label" style="width:auto;min-width:80px">Status:</span> <span id="pf-conn">—</span> <small class="help" style="margin-left:8px">(<span id="pf-state">—</span>)</small></div>
-          <div class="help" id="pf-jid" style="margin-top:4px;">—</div>
-          <div id="pf-qr-wrap" style="margin-top:6px;display:none"><img id="pf-qr" alt="QR" style="max-width:180px;border:1px solid #222;padding:4px;border-radius:4px"/></div>
-          <div class="row" style="gap:6px;margin-top:8px">
-            <button class="btn sm" id="btn-connect">Conectar</button>
-            <button class="btn sm outline" id="btn-generate-qr">Gerar QRCode</button>
-            <button class="btn sm outline" id="btn-disconnect" style="display:none">Desconectar</button>
-            <button class="btn sm" id="btn-regen-qr" style="display:none">Regenerar QR</button>
-            <button class="btn sm" id="btn-clean" style="display:none">Desvincular</button>
+          <div class="row">
+            <span>Status:</span> 
+            <span id="pfConn">—</span> 
+            <small>(<span id="pfState">—</span>)</small>
+          </div>
+          <div class="help" id="pfJid">—</div>
+          <div class="row" style="margin-top: 12px; gap: 8px; flex-wrap: wrap;">
+            <button class="btn outline" id="btnConnect">Conectar</button>
+            <button class="btn outline" id="btnGenerateQR">QR Code</button>
+            <button class="btn outline" id="btnDisconnect" style="display: none;">Desconectar</button>
           </div>
         </div>
       </div>
-      <div class="drawer-f" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-        <button class="btn outline" id="btn-logout">Logout</button>
-        <button class="btn" data-close-profile>Fechar</button>
+      <div class="drawer-footer">
+        <button class="btn outline" id="btnLogout">Logout</button>
+        <button class="btn primary" data-close="profileDrawer">Fechar</button>
       </div>
     </div>
   </div>
 
-  <!-- Modal Nova Conversa -->
-  <div class="modal" id="new-chat-modal" aria-hidden="true">
-    <div class="modal-content">
-      <div class="modal-h">
-        <h3>Nova Conversa</h3>
-        <button type="button" class="close-btn" data-close-new-chat aria-label="Fechar">×</button>
-      </div>
-      <div class="modal-body">
-        <form id="new-chat-form">
-          <div class="field">
-            <label for="phone-input">Número do telefone:</label>
-            <input type="text" id="phone-input" class="input" placeholder="+55 98 99999-9999" maxlength="20">
-            <div class="validation-feedback" id="phone-validation" style="margin-top: 8px; font-size: 14px; display: none;"></div>
-            <div class="help">Digite o número completo. Para celulares, incluir o 9º dígito</div>
-          </div>
-        </form>
-      </div>
-      <div class="modal-f">
-        <button type="button" class="btn outline" data-close-new-chat>Cancelar</button>
-        <button type="submit" form="new-chat-form" class="btn" id="create-chat-btn">Iniciar Conversa</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal Confirmar Exclusão -->
-  <div class="modal" id="delete-contact-modal" aria-hidden="true">
-    <div class="modal-content">
-      <div class="modal-h">
-        <h3>Excluir Conversa</h3>
-        <button type="button" class="close-btn" data-close-delete aria-label="Fechar">×</button>
-      </div>
-      <div class="modal-body">
-        <p>Tem certeza que deseja excluir a conversa com <strong id="delete-contact-name">este contato</strong>?</p>
-        <p class="help">Esta ação não pode ser desfeita.</p>
-      </div>
-      <div class="modal-f">
-        <button type="button" class="btn outline" data-close-delete>Cancelar</button>
-        <button type="button" class="btn danger" id="confirm-delete-btn">Excluir</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal Gerenciar Contatos -->
-  <div class="modal" id="contacts-modal" aria-hidden="true">
-    <div class="modal-content" style="max-width: 800px;">
-      <div class="modal-h">
-        <h3 style="margin: 0;">📞 Gerenciar Contatos</h3>
-        <button class="close-btn" data-close-contacts aria-label="Fechar">×</button>
-      </div>
-      <div class="modal-body">
-        <!-- Barra de Ferramentas -->
-        <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
-          <input type="text" id="contact-search" placeholder="🔍 Buscar contatos..." class="input" style="flex: 1; min-width: 200px;">
-          <button type="button" class="btn" id="add-contact-btn">➕ Adicionar</button>
-          <button type="button" class="btn outline" id="import-contacts-btn">📥 Importar</button>
-          <button type="button" class="btn outline" id="export-contacts-btn">📤 Exportar</button>
-        </div>
-
-        <!-- Estatísticas -->
-        <div id="contact-stats" style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;">
-          <div class="badge">Total: <span id="stats-total">0</span></div>
-          <div class="badge">Com notas: <span id="stats-notes">0</span></div>
-          <div class="badge">Tags: <span id="stats-tags">0</span></div>
-        </div>
-
-        <!-- Lista de Contatos -->
-        <div id="contacts-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--wa-border); border-radius: 12px;">
-          <div id="contacts-empty" style="text-align: center; padding: 40px; color: var(--muted);">
-            <p>📱 Nenhum contato encontrado</p>
-            <p style="font-size: 0.9rem;">Adicione contatos manualmente ou importe de uma planilha</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal Adicionar/Editar Contato -->
-  <div class="modal" id="contact-form-modal" aria-hidden="true">
-    <div class="modal-content">
-      <div class="modal-h">
-        <h3 id="contact-form-title" style="margin: 0;">Adicionar Contato</h3>
-        <button class="close-btn" data-close-contact-form aria-label="Fechar">×</button>
-      </div>
-      <div class="modal-body">
-        <form id="contact-form">
-          <div class="field">
-            <label for="contact-name">Nome *</label>
-            <input type="text" id="contact-name" class="input" placeholder="Nome do contato" required>
-          </div>
-          <div class="field">
-            <label for="contact-phone">Telefone *</label>
-            <input type="tel" id="contact-phone" class="input" placeholder="5598999999999" required>
-            <div class="help">Formato: código do país + DDD + número (ex: 5598999999999)</div>
-          </div>
-          <div class="field">
-            <label for="contact-tags">Tags</label>
-            <input type="text" id="contact-tags" class="input" placeholder="cliente, importante, família">
-            <div class="help">Separe as tags por vírgula</div>
-          </div>
-          <div class="field">
-            <label for="contact-notes">Notas</label>
-            <textarea id="contact-notes" class="input" placeholder="Observações sobre o contato..." rows="3"></textarea>
-          </div>
-        </form>
-      </div>
-      <div class="modal-f">
-        <button type="button" class="btn outline" data-close-contact-form>Cancelar</button>
-        <button type="button" class="btn" id="save-contact-btn">Salvar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Input oculto para importação -->
-  <input type="file" id="import-file-input" accept=".csv,.xlsx,.xls" style="display: none;">
-
-  <script src="/contacts.js"></script>
+  <!-- Scripts -->
+  <script src="/security-utils.js"></script>
   <script>
-  // Util toast
-  function toast(msg,type='ok'){
-    const t=document.createElement('div');
-    t.className='toast '+type;
-    t.textContent=msg;
-    document.body.appendChild(t);
-    requestAnimationFrame(()=>t.classList.add('show'));
-    setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500);
-  }
+    // Application state
+    const state = {
+      currentChat: null,
+      chats: new Map(),
+      messages: new Map(),
+      sessionId: localStorage.getItem('session_id'),
+      isLoading: false
+    };
 
-  // Estado dinâmico: chats (Map) e mensagens por JID
-  const chatsMap = new Map(); // jid -> { id, name, last, time, unread, starred }
-  const messagesByJid = new Map(); // jid -> [ { id,text,fromMe,timestamp } ]
-  const contactsMap = new Map(); // jid -> { name, is_group }
-  let activeFilter='all';
-  let currentChat=null; // objeto { id, name }
-  const app=document.getElementById('app');
-  const listEl=document.getElementById('chat-list');
-  const messagesEl=document.getElementById('messages');
-  const peerName=document.getElementById('peer-name');
-  const onlineBadge=document.getElementById('online-badge');
-  const backBtn=document.getElementById('back');
-  const svcBadge=document.getElementById('svc-badge');
-  const textInput=document.getElementById('text');
-  const composer=document.getElementById('composer');
-  let msgSeq=0; // contador sintético para IDs de mensagens
-  const LS_CHAT_KEY='last_chat_id';
+    // DOM elements
+    const elements = {
+      app: document.getElementById('app'),
+      chatList: document.getElementById('chatList'),
+      searchInput: document.getElementById('searchInput'),
+      messagesContainer: document.getElementById('messagesContainer'),
+      messageInput: document.getElementById('messageInput'),
+      composer: document.getElementById('composer'),
+      chatHeader: document.getElementById('chatHeader'),
+      statusDot: document.getElementById('statusDot'),
+      statusText: document.getElementById('statusText'),
+      profileBtn: document.getElementById('profileBtn'),
+      newChatBtn: document.getElementById('newChatBtn'),
+      currentAvatar: document.getElementById('currentAvatar'),
+      currentName: document.getElementById('currentName'),
+      currentStatus: document.getElementById('currentStatus'),
+      hambMenu: document.getElementById('hambMenu'),
+      hambBtn: document.getElementById('hambBtn'),
+      themeToggle: document.getElementById('themeToggle'),
+      newChatModal: document.getElementById('newChatModal'),
+      profileDrawer: document.getElementById('profileDrawer'),
+      bottomNav: document.getElementById('bottomNav'),
+      backBtn: document.getElementById('backBtn'),
+      chatSearch: document.getElementById('chatSearch'),
+      chatInfo: document.getElementById('chatInfo')
+    };
 
-  // Buscar contatos salvos do backend
-  async function loadContacts() {
-    try {
-      const response = await fetch('/me/contacts');
-      if (response.ok) {
-        const data = await response.json();
-        contactsMap.clear();
-        data.contacts.forEach(contact => {
-          contactsMap.set(contact.jid, {
-            name: contact.name,
-            is_group: contact.is_group
-          });
+    // Initialize app
+    function init() {
+      initTheme();
+      setupEventListeners();
+      loadChats();
+      startStatusPolling();
+      startSSE();
+      updateConnectionStatus();
+      
+      // Mobile adaptations
+      handleMobileLayout();
+    }
+    
+    function handleMobileLayout() {
+      if (window.innerWidth <= 768) {
+        elements.backBtn.style.display = 'block';
+      }
+      
+      window.addEventListener('resize', () => {
+        if (window.innerWidth > 768) {
+          elements.app.classList.remove('sidebar-open');
+          elements.backBtn.style.display = 'none';
+        } else {
+          elements.backBtn.style.display = 'block';
+        }
+      });
+    }
+
+    function setupEventListeners() {
+      // Search
+      elements.searchInput.addEventListener('input', handleSearch);
+      
+      // Composer
+      elements.composer.addEventListener('submit', handleSendMessage);
+      elements.messageInput.addEventListener('input', autoResize);
+      elements.messageInput.addEventListener('keydown', handleKeyDown);
+      
+      // Header controls
+      elements.hambBtn.addEventListener('click', toggleMenu);
+      elements.themeToggle.addEventListener('click', toggleTheme);
+      elements.profileBtn.addEventListener('click', () => openModal('profileDrawer'));
+      
+      // Chat controls
+      elements.backBtn.addEventListener('click', goBack);
+      elements.chatSearch.addEventListener('click', () => toast('Busca em desenvolvimento', 'info'));
+      elements.chatInfo.addEventListener('click', () => toast('Informações em desenvolvimento', 'info'));
+      
+      // New chat
+      elements.newChatBtn.addEventListener('click', () => openModal('newChatModal'));
+      document.getElementById('createChatBtn').addEventListener('click', createNewChat);
+      
+      // Filters
+      document.querySelectorAll('.chip').forEach(chip => {
+        chip.addEventListener('click', handleFilter);
+      });
+      
+      // Modal/Drawer controls
+      document.querySelectorAll('[data-close]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          closeModal(e.target.dataset.close);
         });
-        console.log('Contatos carregados:', contactsMap.size);
-      }
-    } catch (err) {
-      console.warn('Erro ao carregar contatos:', err);
-    }
-  }
-
-  // Função para formatar JID em nome legível
-  function formatContactName(jid) {
-    if (!jid) return 'Desconhecido';
-    
-    // Extrair número do JID
-    const phone = jid.includes('@') ? jid.split('@')[0] : jid;
-    
-    // 🆕 USAR SISTEMA DE CONTATOS
-    const contactName = contactManager.getContactName(phone);
-    
-    // Se encontrou nome no sistema, retorna
-    if (contactName && contactName !== phone) {
-      return contactName;
-    }
-    
-    // Fallback: verificar contactsMap antigo (compatibilidade)
-    const oldContact = contactsMap.get(jid);
-    if (oldContact && oldContact.name && oldContact.name !== jid) {
-      return oldContact.name;
-    }
-    
-    // Fallback: formatar número bonito
-    if (phone.startsWith('55') && phone.length >= 12) {
-      const ddd = phone.substring(2, 4);
-      const number = phone.substring(4);
-      const part1 = number.substring(0, number.length - 4);
-      const part2 = number.substring(number.length - 4);
-      return `+55 (${ddd}) ${part1}-${part2}`;
-    }
-    
-    return `+${phone}`;
-  }
-
-  // Cache de fotos de perfil
-  const profilePhotosCache = new Map();
-
-  // Função para buscar foto de perfil
-  async function getProfilePhoto(jid, type = 'preview') {
-    const cacheKey = `${jid}_${type}`;
-    
-    // Verificar cache primeiro
-    if (profilePhotosCache.has(cacheKey)) {
-      return profilePhotosCache.get(cacheKey);
-    }
-    
-    try {
-      const response = await fetch(`/contacts/${encodeURIComponent(jid)}/photo?type=${type}`);
-      if (response.ok) {
-        const data = await response.json();
-        const photoUrl = data.success ? data.profileUrl : null;
-        
-        // Guardar no cache (null também é válido)
-        profilePhotosCache.set(cacheKey, photoUrl);
-        
-        return photoUrl;
-      }
-    } catch (error) {
-      console.warn('Erro ao buscar foto de perfil:', error);
-    }
-    
-    // Em caso de erro, cachear null
-    profilePhotosCache.set(cacheKey, null);
-    return null;
-  }
-
-  // Função para criar avatar com foto ou iniciais
-  async function createAvatarElement(jid) {
-    const avatarEl = document.createElement('div');
-    avatarEl.className = 'avatar';
-    
-    try {
-      const photoUrl = await getProfilePhoto(jid, 'preview');
-      
-      if (photoUrl) {
-        // Usar foto de perfil
-        avatarEl.style.backgroundImage = `url("${photoUrl}")`;
-        avatarEl.style.backgroundSize = 'cover';
-        avatarEl.style.backgroundPosition = 'center';
-        avatarEl.innerHTML = ''; // Limpar conteúdo
-      } else {
-        // Usar iniciais
-        const displayName = formatContactName(jid);
-        const initials = displayName.split(' ')
-          .map(word => word.charAt(0).toUpperCase())
-          .join('')
-          .substring(0, 2);
-        
-        avatarEl.textContent = initials;
-        avatarEl.style.backgroundImage = 'none';
-      }
-    } catch (error) {
-      // Em caso de erro, usar iniciais
-      const displayName = formatContactName(jid);
-      const initials = displayName.split(' ')
-        .map(word => word.charAt(0).toUpperCase())
-        .join('')
-        .substring(0, 2);
-      
-      avatarEl.textContent = initials;
-      avatarEl.style.backgroundImage = 'none';
-    }
-    
-    return avatarEl;
-  }
-
-  // Função para normalizar números brasileiros
-  function normalizeBrazilianPhone(phone) {
-    // Remove todos os caracteres não numéricos
-    const digits = phone.replace(/\D/g, '');
-    
-    // Se já tem @ é um JID, retorna como está
-    if (phone.includes('@')) return phone;
-    
-    // Se não começa com 55, assume Brasil e adiciona
-    let workingDigits = digits;
-    if (!workingDigits.startsWith('55')) {
-      workingDigits = '55' + digits;
-    }
-    
-    // Remove código do país (55)
-    const withoutCountry = workingDigits.slice(2);
-    
-    // Se tem menos de 10 dígitos, número inválido
-    if (withoutCountry.length < 10) {
-      return null; // Número inválido
-    }
-    
-    // Extrai DDD e resto do número
-    const ddd = withoutCountry.slice(0, 2);
-    const rest = withoutCountry.slice(2);
-    
-    // Valida DDD (11-99)
-    const dddNum = parseInt(ddd);
-    if (dddNum < 11 || dddNum > 99) {
-      return null; // DDD inválido
-    }
-    
-    // Se tem 8 dígitos, é telefone fixo
-    if (rest.length === 8) {
-      return `55${ddd}${rest}`;
-    }
-    
-    // Se tem 9 dígitos mas não começa com 9, adiciona 9
-    if (rest.length === 8) {
-      return `55${ddd}9${rest}`;
-    }
-    
-    // Se tem 9 dígitos e já começa com 9, mantém
-    if (rest.length === 9 && rest.startsWith('9')) {
-      return workingDigits;
-    }
-    
-    // Se tem 9 dígitos mas não começa com 9, adiciona 9
-    if (rest.length === 9 && !rest.startsWith('9')) {
-      return `55${ddd}9${rest}`;
-    }
-    
-    return workingDigits;
-  }
-
-  // Função para formatar número para exibição
-  function formatPhoneDisplay(phone) {
-    const digits = phone.replace(/\D/g, '');
-    
-    if (digits.startsWith('55') && digits.length >= 12) {
-      const ddd = digits.slice(2, 4);
-      const first = digits.slice(4, 9);
-      const second = digits.slice(9);
-      return `+55 ${ddd} ${first}-${second}`;
-    }
-    
-    return phone;
-  }
-
-  // Função para validar formato brasileiro obrigatório: 55 + DDD + 9 + 8 dígitos
-  function validateBrazilianPhone(phone) {
-    // Remove todos os caracteres não numéricos
-    const digits = phone.replace(/\D/g, '');
-    
-    // Deve ter exatamente 13 dígitos (55 + 2 DDD + 1 nono dígito + 8 números)
-    if (digits.length !== 13) {
-      return {
-        valid: false,
-        message: 'Número deve ter 13 dígitos: 55 + DDD + 9 + 8 números',
-        normalized: null
-      };
-    }
-    
-    // Deve começar com 55 (código do Brasil)
-    if (!digits.startsWith('55')) {
-      return {
-        valid: false,
-        message: 'Número deve começar com 55 (código do Brasil)',
-        normalized: null
-      };
-    }
-    
-    // Extrai DDD (dígitos 3 e 4)
-    const ddd = digits.slice(2, 4);
-    const dddNumber = parseInt(ddd);
-    
-    // Verifica se é um DDD válido (11-99)
-    if (dddNumber < 11 || dddNumber > 99) {
-      return {
-        valid: false,
-        message: 'DDD inválido. Deve estar entre 11 e 99',
-        normalized: null
-      };
-    }
-    
-    // Verifica se o 5º dígito é 9 (nono dígito obrigatório para celulares)
-    const ninthDigit = digits[4];
-    if (ninthDigit !== '9') {
-      return {
-        valid: false,
-        message: 'Número de celular deve ter o 9º dígito. Formato: 55 + DDD + 9 + 8 números',
-        normalized: null
-      };
-    }
-    
-    return {
-      valid: true,
-      message: 'Número válido',
-      normalized: digits,
-      formatted: formatPhoneDisplay(digits)
-    };
-  }
-
-  async function renderChatList(){
-    listEl.innerHTML='';
-    const lastId = localStorage.getItem(LS_CHAT_KEY);
-    const chatsArr = Array.from(chatsMap.values()).sort((a,b)=> (b.timestamp||0)-(a.timestamp||0));
-    
-    const filteredChats = chatsArr.filter(c=>{
-      if(activeFilter==='unread') return (c.unread||0) > 0;
-      if(activeFilter==='starred') return !!c.starred;
-      return true;
-    });
-
-    // Renderizar chats um por vez para carregar fotos
-    for (const c of filteredChats) {
-      const item = document.createElement('div');
-      item.className='chat-item';
-      item.dataset.chatId = c.id; // Para identificação nos gestos
-      if(currentChat && currentChat.id===c.id) item.classList.add('is-active');
-      if(!currentChat && lastId && lastId===c.id) item.classList.add('is-active');
-      
-      const unreadBadge = (c.unread||0) > 0 ? `<span class="unread">${c.unread}</span>` : '';
-      const star = `<button class="star-btn" data-star="${c.id}" aria-label="Marcar favorito">${c.starred?'★':'☆'}</button>`;
-      const deleteBtn = `<button class="delete-btn" data-delete="${c.id}" aria-label="Excluir conversa" title="Excluir conversa">🗑️</button>`;
-      const displayName = formatContactName(c.id);
-      
-      // Criar avatar com foto
-      const avatarEl = await createAvatarElement(c.id);
-      
-      // Swipe actions para mobile
-      const swipeActions = `
-        <div class="swipe-actions">
-          <button class="swipe-action star" data-action="star" data-chat="${c.id}">⭐</button>
-          <button class="swipe-action delete" data-action="delete" data-chat="${c.id}">🗑️</button>
-        </div>
-      `;
-      
-      item.innerHTML = `${swipeActions}<div class="meta"><div class="name">${displayName} <div class="actions">${star}${deleteBtn}</div></div><div class="last">${escapeHtml(c.last||'')}</div></div><div class="time">${c.time||''} ${unreadBadge}</div>`;
-      
-      // Inserir avatar no início
-      item.insertBefore(avatarEl, item.firstChild);
-      
-      item.addEventListener('click',(ev)=>{
-        const target = ev.target;
-        if(target && target.closest && (target.closest('.star-btn') || target.closest('.delete-btn'))) return;
-        selectChat(c.id);
       });
       
-      listEl.appendChild(item);
-    }
-    
-    // estrela toggle
-    listEl.querySelectorAll('.star-btn').forEach(btn=>{
-      btn.addEventListener('click', function(e){
-        e.stopPropagation();
-        const id=this.getAttribute('data-star');
-        const chat=chatsMap.get(id);
-        if(chat){ chat.starred=!chat.starred; renderChatList(); }
-      })
-    })
-    // delete toggle
-    listEl.querySelectorAll('.delete-btn').forEach(btn=>{
-      btn.addEventListener('click', function(e){
-        e.stopPropagation();
-        const jid = this.getAttribute('data-delete');
-        openDeleteModal(jid);
-      })
-    })
-  }
-
-  // Variável para guardar JID a ser deletado
-  let contactToDelete = null;
-
-  // Abrir modal de confirmação de exclusão
-  function openDeleteModal(jid) {
-    contactToDelete = jid;
-    const displayName = formatContactName(jid);
-    document.getElementById('delete-contact-name').textContent = displayName;
-    document.getElementById('delete-contact-modal').setAttribute('aria-hidden', 'false');
-  }
-
-  // Fechar modal de exclusão
-  document.querySelectorAll('[data-close-delete]').forEach(btn => {
-    btn.onclick = () => {
-      document.getElementById('delete-contact-modal').setAttribute('aria-hidden', 'true');
-      contactToDelete = null;
-    };
-  });
-
-  // Confirmar exclusão
-  document.getElementById('confirm-delete-btn').onclick = async () => {
-    if (!contactToDelete) return;
-    
-    try {
-      const response = await fetch(`/me/contacts/${encodeURIComponent(contactToDelete)}`, {
-        method: 'DELETE'
+      // Bottom navigation
+      document.querySelectorAll('.bottom-nav-item').forEach(item => {
+        item.addEventListener('click', handleBottomNav);
       });
       
-      if (response.ok) {
-        // Remover do frontend
-        chatsMap.delete(contactToDelete);
-        messagesByJid.delete(contactToDelete);
-        contactsMap.delete(contactToDelete);
-        
-        // Se era o chat ativo, limpar seleção
-        if (currentChat && currentChat.id === contactToDelete) {
-          currentChat = null;
-          peerName.textContent = 'Selecione uma conversa';
-          messagesEl.innerHTML = '';
-          if (window.matchMedia('(max-width:1023px)').matches) {
-            delete app.dataset.view;
-            backBtn.style.display = 'none';
-          }
+      // Menu items - funcionalidades reais
+      document.getElementById('menuFlow')?.addEventListener('click', () => openModal('flowModal'));
+      document.getElementById('menuSchedule')?.addEventListener('click', () => openModal('scheduleModal'));
+      document.getElementById('menuTags')?.addEventListener('click', () => toast('Etiquetas em desenvolvimento', 'info'));
+      document.getElementById('menuContacts')?.addEventListener('click', () => openModal('contactsModal'));
+      document.getElementById('menuSettings')?.addEventListener('click', () => toast('Configurações em desenvolvimento', 'info'));
+      
+      // Profile drawer actions
+      document.getElementById('btnConnect')?.addEventListener('click', connectWhatsApp);
+      document.getElementById('btnGenerateQR')?.addEventListener('click', () => openModal('qrModal'));
+      document.getElementById('btnDisconnect')?.addEventListener('click', disconnectWhatsApp);
+      document.getElementById('btnClean')?.addEventListener('click', cleanWhatsApp);
+      document.getElementById('btnLogout')?.addEventListener('click', logout);
+      
+      // AI Flow
+      document.getElementById('saveAiSettings')?.addEventListener('click', saveAiSettings);
+      
+      // Schedule
+      document.getElementById('scheduleSubmit')?.addEventListener('click', scheduleMessage);
+      
+      // QR Code
+      document.getElementById('regenerateQR')?.addEventListener('click', generateQRCode);
+      
+      // Contacts
+      document.getElementById('addContactBtn')?.addEventListener('click', addContact);
+      document.getElementById('exportContacts')?.addEventListener('click', exportContacts);
+      document.getElementById('contactSearch')?.addEventListener('input', searchContacts);
+      
+      // Phone validation
+      document.getElementById('phoneInput')?.addEventListener('input', validatePhone);
+      
+      // Close modals on backdrop click
+      document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('modal') || e.target.classList.contains('drawer')) {
+          e.target.classList.remove('active');
         }
-        
-        renderChatList();
-        toast('Conversa excluída com sucesso');
-      } else {
-        throw new Error('Erro ao excluir');
-      }
-    } catch (err) {
-      console.error('Erro ao excluir contato:', err);
-      toast('Erro ao excluir conversa', 'err');
+      });
     }
-    
-    // Fechar modal
-    document.getElementById('delete-contact-modal').setAttribute('aria-hidden', 'true');
-    contactToDelete = null;
-  };
 
-  function escapeHtml(t){ return t.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]||c)) }
+    // Auto-resize textarea
+    function autoResize() {
+      const textarea = elements.messageInput;
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+    }
 
-  // === LINKIFY FUNCTION ===
-  function linkify(text) {
-    // Regex para detectar URLs (http, https, www, e domínios simples)
-    const urlRegex = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:\/[^\s<>"']*)?)/gi;
-    
-    return text.replace(urlRegex, (url) => {
-      let href = url;
-      // Adicionar protocolo se necessário
-      if (!url.match(/^https?:\/\//)) {
-        href = 'https://' + url;
+    // Handle Enter key
+    function handleKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        elements.composer.requestSubmit();
       }
+    }
+
+    // Search functionality
+    function handleSearch(e) {
+      const query = e.target.value.toLowerCase();
+      const chatItems = elements.chatList.querySelectorAll('.chat-item');
       
-      return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="msg-link">${url}</a>`;
-    });
-  }
-
-  async function selectChat(jid){
-    const chat = chatsMap.get(jid);
-    if(!chat) return;
-    currentChat = chat;
-    localStorage.setItem(LS_CHAT_KEY, chat.id);
-    chat.unread = 0;
-    peerName.textContent = formatContactName(jid);
-    
-    // Atualizar avatar do cabeçalho
-    const headerAvatar = document.querySelector('.c-header .avatar');
-    if (headerAvatar) {
-      const newAvatar = await createAvatarElement(jid);
-      headerAvatar.replaceWith(newAvatar);
+      chatItems.forEach(item => {
+        const name = item.querySelector('.chat-name').textContent.toLowerCase();
+        const visible = name.includes(query);
+        item.style.display = visible ? 'flex' : 'none';
+      });
     }
-    
-    messagesEl.innerHTML='';
-    const msgs = messagesByJid.get(jid)||[];
-    msgs.sort((a,b)=>a.timestamp-b.timestamp).forEach(m=>pushMsg(m.fromMe?'out':'in', m.text, m.id, m.mediaInfo));
-    if(window.matchMedia('(max-width:1023px)').matches){ app.dataset.view='chat'; backBtn.style.display='inline-block'; }
-    document.querySelectorAll('.chat-item').forEach(el=>el.classList.remove('is-active'));
-    const displayName = formatContactName(jid);
-    requestAnimationFrame(()=>{
-      [...document.querySelectorAll('.chat-item')].find(el=>el.textContent.includes(displayName))?.classList.add('is-active');
-    })
-    scrollBottom();
-    renderChatList(); // atualiza contadores
-  }
 
-  function pushMsg(dir,text,id,mediaInfo){
-    const temp = !id;
-    const timestamp = Date.now();
-    id = id || (timestamp.toString(36)+'-'+(msgSeq++).toString(36));
-    
-    const el=document.createElement('div');
-    el.className='msg '+(dir==='out'?'out':'in');
-    el.setAttribute('data-id', id);
-    el.setAttribute('data-timestamp', timestamp.toString()); // Para reconciliação otimista
-    
-    // Verificar se tem mídia
-    if(mediaInfo && mediaInfo.type !== 'document') {
-      // Criar preview de mídia
-      const mediaEl = createMediaPreview(mediaInfo, id);
-      el.appendChild(mediaEl);
-      
-      // Adicionar caption se houver texto
-      if(text && text !== `📎 ${mediaInfo.filename}`) {
-        const captionEl = document.createElement('div');
-        captionEl.className = 'media-caption';
-        captionEl.innerHTML = linkify(escapeHtml(text));
-        el.appendChild(captionEl);
-      }
-    } else {
-      // Mensagem de texto normal ou documento
-      const linkedText = linkify(escapeHtml(text));
-      el.innerHTML = linkedText;
-    }
-    
-    if(temp) el.classList.add('pending');
-    // etiqueta existente via API (fetch preguiçoso)
-    fetch('/tags').then(r=>r.ok?r.json():{tags:{}}).then(j=>{
-      const t=j.tags||{}; if(t[id]){ const tagEl=document.createElement('div'); tagEl.className='meta'; tagEl.textContent='#'+t[id]; el.appendChild(tagEl); }
-    }).catch(()=>{})
-    // menu de contexto para etiquetar
-    el.addEventListener('contextmenu', (e)=>{
+    // Send message
+    async function handleSendMessage(e) {
       e.preventDefault();
-      const tagInput = document.getElementById('tag-msg-id');
-      if(tagInput) tagInput.value = id;
-      show('#mdl-tags');
-    });
-    messagesEl.appendChild(el);
-    scrollBottom();
-  }
-  
-  // Função para criar preview de mídia
-  function createMediaPreview(mediaInfo, messageId) {
-    const container = document.createElement('div');
-    container.className = `media-preview media-${mediaInfo.type}`;
-    
-    if(mediaInfo.type === 'image') {
-      const img = document.createElement('img');
-      img.className = 'media-thumbnail lazy';
-      img.src = '/media/thumbnail/' + getMediaHash(mediaInfo);
-      img.alt = mediaInfo.filename;
-      img.style.cssText = 'max-width: 250px; max-height: 200px; border-radius: 8px; cursor: pointer;';
       
-      // Click para abrir modal de preview
-      img.onclick = () => openMediaModal(mediaInfo, messageId);
+      const text = elements.messageInput.value.trim();
+      if (!text || !state.currentChat) return;
       
-      container.appendChild(img);
-    } else if(mediaInfo.type === 'video') {
-      const videoContainer = document.createElement('div');
-      videoContainer.className = 'video-preview';
-      videoContainer.style.cssText = 'position: relative; max-width: 250px; max-height: 200px; border-radius: 8px; cursor: pointer; background: #000;';
-      
-      const thumbnail = document.createElement('img');
-      thumbnail.src = '/media/thumbnail/' + getMediaHash(mediaInfo);
-      thumbnail.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 8px;';
-      
-      const playBtn = document.createElement('div');
-      playBtn.innerHTML = '▶️';
-      playBtn.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; color: white; background: rgba(0,0,0,0.7); width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center;';
-      
-      videoContainer.appendChild(thumbnail);
-      videoContainer.appendChild(playBtn);
-      videoContainer.onclick = () => openMediaModal(mediaInfo, messageId);
-      
-      container.appendChild(videoContainer);
-    } else if(mediaInfo.type === 'audio') {
-      const audioEl = document.createElement('div');
-      audioEl.className = 'audio-preview';
-      audioEl.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255,255,255,0.1); border-radius: 8px; max-width: 250px;';
-      
-      const iconEl = document.createElement('div');
-      iconEl.innerHTML = '🎵';
-      iconEl.style.fontSize = '24px';
-      
-      const infoEl = document.createElement('div');
-      infoEl.innerHTML = `<div style="font-weight: 500;">${mediaInfo.filename}</div><div style="font-size: 0.8em; opacity: 0.7;">${formatFileSize(mediaInfo.size)}</div>`;
-      
-      audioEl.appendChild(iconEl);
-      audioEl.appendChild(infoEl);
-      audioEl.onclick = () => openMediaModal(mediaInfo, messageId);
-      
-      container.appendChild(audioEl);
-    }
-    
-    return container;
-  }
-  
-  // Modal para visualização de mídia
-  function openMediaModal(mediaInfo, messageId) {
-    const modal = document.createElement('div');
-    modal.className = 'media-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 20px;';
-    
-    const closeBtn = document.createElement('button');
-    closeBtn.innerHTML = '✖';
-    closeBtn.style.cssText = 'position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.2); border: none; color: white; font-size: 24px; width: 40px; height: 40px; border-radius: 50%; cursor: pointer;';
-    closeBtn.onclick = () => modal.remove();
-    
-    let content;
-    if(mediaInfo.type === 'image') {
-      content = document.createElement('img');
-      content.src = '/media/preview/' + getMediaHash(mediaInfo);
-      content.style.cssText = 'max-width: 90vw; max-height: 90vh; object-fit: contain;';
-    } else if(mediaInfo.type === 'video') {
-      content = document.createElement('video');
-      content.src = `/media/original/${currentChat?.sessionId || 'default'}/${messageId}`;
-      content.controls = true;
-      content.style.cssText = 'max-width: 90vw; max-height: 90vh;';
-    } else if(mediaInfo.type === 'audio') {
-      content = document.createElement('div');
-      content.style.cssText = 'text-align: center; color: white;';
-      
-      const audioEl = document.createElement('audio');
-      audioEl.src = `/media/original/${currentChat?.sessionId || 'default'}/${messageId}`;
-      audioEl.controls = true;
-      audioEl.style.width = '300px';
-      
-      const infoEl = document.createElement('div');
-      infoEl.innerHTML = `<h3>${mediaInfo.filename}</h3><p>${formatFileSize(mediaInfo.size)}</p>`;
-      
-      content.appendChild(infoEl);
-      content.appendChild(audioEl);
-    }
-    
-    modal.appendChild(closeBtn);
-    modal.appendChild(content);
-    document.body.appendChild(modal);
-    
-    // Fechar com ESC ou clique fora
-    modal.addEventListener('click', (e) => {
-      if(e.target === modal) modal.remove();
-    });
-    document.addEventListener('keydown', function escHandler(e) {
-      if(e.key === 'Escape') {
-        modal.remove();
-        document.removeEventListener('keydown', escHandler);
-      }
-    });
-  }
-  
-  // Utilitários
-  function getMediaHash(mediaInfo) {
-    // Gerar hash baseado no filename e size para identificar mídia
-    if(!mediaInfo || !mediaInfo.filename) return 'unknown';
-    const hashInput = mediaInfo.filename + (mediaInfo.size || 0);
-    return hashInput.replace(/[^a-zA-Z0-9]/g, '').substring(0, 16) + '.webp';
-  }
-  
-  function formatFileSize(bytes) {
-    if(bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  }
-  function scrollBottom(){ messagesEl.scrollTop=messagesEl.scrollHeight; }
-
-  backBtn.onclick=()=>{
-    delete app.dataset.view;
-    backBtn.style.display='none';
-  };
-
-  // Service badge reflects WhatsApp session health (ONLINE only when state==='open')
-  function setSvcBadge(online){
-    if(!svcBadge) return;
-    svcBadge.textContent = online ? 'ONLINE' : 'OFFLINE';
-    svcBadge.style.background = online ? '#0f1a16' : '#3a1a1a';
-    svcBadge.style.color = online ? '#9be3c2' : '#fca5a5';
-  }
-  // default state until first poll
-  setSvcBadge(false);
-
-  // Session status polling
-  const storedSession=localStorage.getItem('session_id');
-  async function pollSession(){
-    if(!storedSession) return;
-    try{
-      const r=await fetch(`/sessions/${encodeURIComponent(storedSession)}/status`);
-      if(r.ok){
-        const j=await r.json();
-        onlineBadge.textContent=j.state==='open' ? (j.jid? `online · ${j.jid}`:'online') : j.state;
-        setSvcBadge(j.state==='open');
-        // Quando conectar, refletir session_id na URL sem recarregar
-        if(j.state==='open'){
-          const url = new URL(window.location.href);
-          if(url.searchParams.get('session_id') !== storedSession){
-            url.searchParams.set('session_id', storedSession);
-            history.replaceState(null, '', url.toString());
-          }
-        }
-      }
-    }catch{}
-  }
-  pollSession(); setInterval(pollSession,5000);
-
-  // Composer send
-  composer.addEventListener('submit', async (e)=>{
-    e.preventDefault();
-    if(!currentChat){ toast('Selecione uma conversa','err'); return; }
-    const text=(textInput.value||'').trim();
-    if(!text) return;
-    const optimisticId = pushMsg('out',text); // retorna undefined, mas mantemos classe pending; iremos reconciliar via SSE
-    const payload={ session_id: localStorage.getItem('session_id') || '', to: currentChat.id, text, client_ref: optimisticId };
-    textInput.value='';
-    autoResize(textInput);
-    try{
-      const r=await fetch('/messages/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      if(!r.ok){ toast('Falha ao enviar','err'); }
-    }catch{ toast('Falha ao enviar','err'); }
-  });
-
-  // Auto-resize textarea up to a max height (approx 6 lines)
-  function autoResize(el){
-    if(!el) return; el.style.height='auto';
-    const max=140; // px
-    const h=Math.min(el.scrollHeight, max);
-    el.style.height=h+'px';
-    el.style.overflowY = el.scrollHeight>max ? 'auto':'hidden';
-  }
-  textInput.addEventListener('input',()=>autoResize(textInput));
-  autoResize(textInput);
-
-  // Enter to send (desktop style): Enter sends, Shift+Enter newline
-  textInput.addEventListener('keydown',(e)=>{
-    if(e.key==='Enter' && !e.shiftKey){
-      e.preventDefault();
-      // Trigger submit programmatically
-      composer.requestSubmit();
-    }
-  });
-
-  // Nova conversa - abrir modal
-  document.getElementById('new-chat').onclick = () => {
-    document.getElementById('new-chat-modal').setAttribute('aria-hidden', 'false');
-    document.getElementById('phone-input').focus();
-  };
-
-  // Fechar modal nova conversa
-  document.querySelectorAll('[data-close-new-chat]').forEach(btn => {
-    btn.onclick = () => {
-      document.getElementById('new-chat-modal').setAttribute('aria-hidden', 'true');
-      document.getElementById('new-chat-form').reset();
-    };
-  });
-
-  // Validar e formatar número de telefone
-  function formatPhone(input) {
-    // Remove tudo exceto números
-    let numbers = input.replace(/\D/g, '');
-    
-    // Se começar com 55, é brasileiro
-    if (numbers.startsWith('55') && numbers.length >= 12) {
-      return `+55 ${numbers.substr(2,2)} ${numbers.substr(4,5)}-${numbers.substr(9,4)}`;
-    }
-    
-    // Outros países - formato genérico
-    if (numbers.length >= 10) {
-      return `+${numbers}`;
-    }
-    
-    return input;
-  }
-
-  function phoneToJid(phone) {
-    // Remove tudo exceto números
-    const numbers = phone.replace(/\D/g, '');
-    
-    // Validar se tem pelo menos 10 dígitos
-    if (numbers.length < 10) return null;
-    
-    return `${numbers}@s.whatsapp.net`;
-  }
-
-  // Auto-formatação e validação em tempo real
-  document.getElementById('phone-input').addEventListener('input', (e) => {
-    const value = e.target.value.trim();
-    const feedback = document.getElementById('phone-validation');
-    const createBtn = document.getElementById('create-chat-btn');
-    
-    if (!value) {
-      feedback.style.display = 'none';
-      createBtn.disabled = false;
-      return;
-    }
-    
-    const validation = validateBrazilianPhone(value);
-    feedback.style.display = 'block';
-    
-    if (validation.valid) {
-      feedback.style.color = '#22c55e'; // Verde
-      feedback.textContent = `✓ ${validation.formatted} (${validation.message})`;
-      createBtn.disabled = false;
-    } else {
-      feedback.style.color = '#ef4444'; // Vermelho
-      feedback.textContent = `✗ ${validation.message}`;
-      createBtn.disabled = true;
-    }
-  });
-
-  // Criar nova conversa com validação melhorada
-  document.getElementById('new-chat-form').onsubmit = (e) => {
-    e.preventDefault();
-    
-    const phoneInput = document.getElementById('phone-input');
-    const phone = phoneInput.value.trim();
-    
-    if (!phone) {
-      toast('Digite um número de telefone', 'err');
-      return;
-    }
-    
-    // Validar com nova função
-    const validation = validateBrazilianPhone(phone);
-    
-    if (!validation.valid) {
-      toast(validation.message, 'err');
-      return;
-    }
-    
-    const jid = `${validation.normalized}@s.whatsapp.net`;
-    
-    // Mostrar preview do número normalizado
-    toast(`Criando conversa para: ${validation.formatted}`, 'ok');
-    
-    // Fechar modal
-    document.getElementById('new-chat-modal').setAttribute('aria-hidden', 'true');
-    
-    // Criar ou abrir conversa
-    createNewChat(jid, validation.formatted);
-    
-    // Reset form
-    phoneInput.value = '';
-  };
-
-  function createNewChat(jid, displayPhone) {
-    // Verificar se já existe
-    if (chatsMap.has(jid)) {
-      selectChat(jid);
-      toast('Conversa já existe!');
-      return;
-    }
-    
-    // Criar nova conversa
-    const newChat = {
-      id: jid,
-      name: jid,
-      last: '',
-      time: '',
-      unread: 0,
-      starred: false,
-      timestamp: Date.now()
-    };
-    
-    chatsMap.set(jid, newChat);
-    messagesByJid.set(jid, []);
-    
-    // Adicionar nome formatado ao mapa de contatos se não existir
-    if (!contactsMap.has(jid)) {
-      contactsMap.set(jid, { name: displayPhone, is_group: false });
-    }
-    
-    renderChatList();
-    selectChat(jid);
-    toast('Nova conversa criada!');
-  }
-
-  // Filter chips
-  document.querySelectorAll('.s-filters .chip').forEach(chip=>{
-    chip.addEventListener('click',()=>{
-      document.querySelectorAll('.s-filters .chip').forEach(c=>c.classList.remove('is-active'));
-      chip.classList.add('is-active');
-      activeFilter = chip.getAttribute('data-filter')||'all';
-      renderChatList();
-    });
-  });
-
-  // Busca real (debounce)
-  const searchInput = document.getElementById('search');
-  let searchTimer=null;
-  if(searchInput){
-    searchInput.addEventListener('input', ()=>{
-      clearTimeout(searchTimer);
-      const q = searchInput.value.trim();
-      if(!q){ renderChatList(); return; }
-      searchTimer=setTimeout(()=> runSearch(q), 350);
-    });
-  }
-  async function runSearch(q){
-    const sessionId = localStorage.getItem('session_id');
-    if(!sessionId) return;
-    try{
-      const r=await fetch(`/sessions/${encodeURIComponent(sessionId)}/search?q=${encodeURIComponent(q)}`);
-      if(!r.ok) return;
-      const j=await r.json();
-      const hits=(j.results||[]).slice(0,50); // limitar
-      // mapear hits a chats e reordenar artificialmente
-      const now=Date.now();
-      hits.forEach((h,i)=>{
-        const jid = h.fromMe? (h.to||h.from): h.from;
-        if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
-        // adicionar ghost message se não existir
-        if(!messagesByJid.get(jid).some(m=>m.id===h.id)){
-          messagesByJid.get(jid).push({ id:h.id, text:h.text||'', fromMe:!!h.fromMe, timestamp:h.timestamp||now });
-        }
-        let chat = chatsMap.get(jid);
-        if(!chat){ chat = { id:jid, name:jid, last:h.text?.slice(0,60)||'', time: formatTime(h.timestamp||now), unread:0, starred:false, timestamp: h.timestamp||now }; chatsMap.set(jid, chat); }
-        chat.last = h.text?.slice(0,60)||'';
-        chat.timestamp = now + (1000 - i); // força ordenar pelo resultado
-        chat.time = formatTime(chat.timestamp);
-      });
-      renderChatList();
-    }catch{}
-  }
-
-  // ===== Perfil =====
-  const profileBtn=document.getElementById('profile-btn');
-  const drwProfile=document.getElementById('drw-profile');
-  const pfUser=document.getElementById('pf-user');
-  const pfSession=document.getElementById('pf-session');
-  const pfPlan=document.getElementById('pf-plan');
-  const pfUsageToday=document.getElementById('pf-usage-today');
-  const pfQuota=document.getElementById('pf-quota');
-  const pfUsageTotal=document.getElementById('pf-usage-total');
-  const pfState=document.getElementById('pf-state');
-  const pfConn=document.getElementById('pf-conn');
-  const pfJid=document.getElementById('pf-jid');
-  const pfQRWrap=document.getElementById('pf-qr-wrap');
-  const pfQR=document.getElementById('pf-qr');
-  const btnConnect=document.getElementById('btn-connect');
-  const btnGenerateQR=document.getElementById('btn-generate-qr');
-  const btnDisconnect=document.getElementById('btn-disconnect');
-  const btnRegen=document.getElementById('btn-regen-qr');
-  const btnClean=document.getElementById('btn-clean');
-  const btnLogout=document.getElementById('btn-logout');
-
-  let profileTimer=null;
-  function showProfile(){ drwProfile.classList.add('show'); loadProfile(); clearInterval(profileTimer); profileTimer=setInterval(loadProfile, 5000); }
-  function hideProfile(){ drwProfile.classList.remove('show'); if(profileTimer){ clearInterval(profileTimer); profileTimer=null; } }
-  drwProfile?.addEventListener('click', (e)=>{ if(e.target===drwProfile) hideProfile(); });
-  document.querySelectorAll('[data-close-profile]').forEach(b=>b.addEventListener('click', hideProfile));
-  profileBtn?.addEventListener('click', showProfile);
-
-  let qrPollTimer=null;
-  async function pollQR(sessionId){
-    clearTimeout(qrPollTimer);
-    try {
-      const url = sessionId ? `/sessions/${encodeURIComponent(sessionId)}/qr` : '/me/session/qr';
-      const r=await fetch(url);
-      if(r.ok){ const j=await r.json(); if(j?.dataUrl){ pfQR.src=j.dataUrl; pfQRWrap.style.display='block'; } }
-      else if(r.status===404){ pfQRWrap.style.display='none'; }
-    }catch{}
-    qrPollTimer=setTimeout(()=>pollQR(sessionId), 3000);
-  }
-
-  async function loadProfile(){
-    try {
-      const r=await fetch('/me/profile');
-      if(!r.ok){ toast('Falha perfil','err'); return }
-      const j=await r.json();
-      pfUser.textContent=j.userId;
-      pfSession.textContent=j.sessionId;
-      pfPlan.textContent=j.plan?.name||'—';
-      pfUsageToday.textContent=j.usage?.messagesToday||0;
-      pfQuota.textContent=j.plan?.quotaDaily||0;
-      pfUsageTotal.textContent=j.usage?.total||0;
-      pfState.textContent=j.session?.state||'—';
-      if(pfConn){ pfConn.textContent = (j.session?.state==='open')? 'ONLINE' : 'OFFLINE'; }
-      if(pfJid){
-        if(j.session?.jid){ pfJid.textContent = 'Conectado: '+ j.session.jid; }
-        else { pfJid.textContent = 'Não conectado'; }
-      }
-      // Persistir session_id para garantir que o restante da UI (SSE, envio) tenha a sessão correta
-      try {
-        if(j.sessionId){
-          localStorage.setItem('session_id', j.sessionId);
-          // manter chave alternativa (legacy) se algum código usa
-          if(!localStorage.getItem('sessionId')) localStorage.setItem('sessionId', j.sessionId);
-          // Se já estiver conectado, refletir session_id na URL
-          if((j.session?.state||'')==='open'){
-            const url = new URL(window.location.href);
-            if(url.searchParams.get('session_id') !== j.sessionId){
-              url.searchParams.set('session_id', j.sessionId);
-              history.replaceState(null, '', url.toString());
-            }
-          }
-        }
-      } catch {}
-      const st=j.session?.state;
-      // Mostrar botões básicos
-      if(st==='open'){
-        if(btnConnect) btnConnect.style.display='none';
-        if(btnGenerateQR) btnGenerateQR.style.display='none';
-        if(btnDisconnect) btnDisconnect.style.display='inline-block';
-      } else {
-        if(btnConnect) btnConnect.style.display='inline-block';
-        if(btnGenerateQR) btnGenerateQR.style.display='inline-block';
-        if(btnDisconnect) btnDisconnect.style.display='none';
-      }
-      const manual = (window.MANUAL_PAIRING === '1');
-      btnRegen.style.display = manual && (st!=='open') ? 'inline-block':'none';
-      btnClean.style.display = 'inline-block';
-      // Exibir/atualizar QR enquanto a sessão não estiver aberta
-      if(st !== 'open'){ pollQR(j.sessionId) } else { pfQRWrap.style.display='none'; clearTimeout(qrPollTimer); }
-    } catch {}
-  }
-
-  // Ações de conexão básicas
-  btnConnect?.addEventListener('click', async ()=>{
-    try{
-      const id = localStorage.getItem('session_id') || localStorage.getItem('sessionId') || '';
-      if(!id){ toast('Sem sessão','err'); return; }
-      // Apenas valida status atual; não dispara geração de QR automaticamente.
-      toast('Verificando sessão...');
-      loadProfile();
-    }catch{ toast('Erro ao conectar','err'); }
-  });
-  btnDisconnect?.addEventListener('click', async ()=>{
-    try{
-      const r=await fetch('/me/session/clean',{method:'POST'});
-      if(!r.ok) return toast('Erro ao desconectar','err');
-      toast('Sessão desconectada');
-      loadProfile();
-    }catch{ toast('Erro rede','err'); }
-  });
-
-  // Gerar QRCode e navegar para a página dedicada
-  btnGenerateQR?.addEventListener('click', async ()=>{
-    try{
-      const id = localStorage.getItem('session_id') || localStorage.getItem('sessionId') || '';
-      if(!id){ toast('Sem sessão','err'); return; }
-      await fetch('/sessions/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:id})}).catch(()=>{});
-      await fetch(`/sessions/${encodeURIComponent(id)}/start`,{method:'POST'}).catch(()=>{});
-      try { localStorage.setItem('sessionId', id); localStorage.setItem('session_id', id); } catch {}
-      window.location.href = `/qr.html?session_id=${encodeURIComponent(id)}`;
-    } catch { toast('Erro ao gerar QR','err'); }
-  });
-
-  btnRegen?.addEventListener('click', async ()=>{
-    btnRegen.disabled=true; try{ const r=await fetch('/me/session/regen-qr',{method:'POST'}); if(r.ok){ toast('Reiniciando sessão'); loadProfile(); } else toast('Erro regen','err'); } finally { btnRegen.disabled=false; }
-  });
-  btnClean?.addEventListener('click', async ()=>{
-    if(!confirm('Desvincular e limpar credenciais?')) return;
-    btnClean.disabled=true; try{ const r=await fetch('/me/session/clean',{method:'POST'}); if(r.ok){ toast('Sessão limpa'); loadProfile(); } else toast('Erro limpar','err'); } finally { btnClean.disabled=false; }
-  });
-  btnLogout?.addEventListener('click', async ()=>{
-    try { const r=await fetch('/me/logout',{method:'POST'}); } catch (err) { console.warn('Logout request failed:', err); }
-    try { localStorage.removeItem('auth'); localStorage.removeItem('sessionId'); localStorage.removeItem('userId'); } catch (err) { console.warn('LocalStorage cleanup failed:', err); }
-    location.replace('/login.html');
-  });
-
-  // Attachment button behavior (placeholder)
-  const attachBtn=document.getElementById('attach');
-  if(attachBtn){
-    const fileInput=document.createElement('input');
-    fileInput.type='file';
-    fileInput.style.display='none';
-    document.body.appendChild(fileInput);
-    attachBtn.addEventListener('click',()=>fileInput.click());
-    fileInput.addEventListener('change', async ()=>{
-      if(!(currentChat && fileInput.files && fileInput.files[0])) return;
-      const f=fileInput.files[0];
-      const sessionId = localStorage.getItem('session_id')||'';
-      if(!sessionId){ toast('Sem sessão','err'); return; }
-      // placeholder msg
-      const placeholderId = pushMsg('out', `📎 Enviando ${f.name}...`);
-      const form = new FormData();
-      form.append('session_id', sessionId);
-      form.append('to', currentChat.id);
-      form.append('file', f);
-      try{
-        const r=await fetch('/messages/media',{method:'POST', body: form});
-        if(!r.ok){ toast('Falha upload','err'); }
-        else {
-          // A mensagem real chegará via SSE; podemos marcar placeholder como enviado
-          const el = messagesEl.querySelector(`[data-id="${placeholderId}"]`);
-          if(el){ el.classList.remove('pending'); el.textContent = `📎 ${f.name}`; }
-        }
-      }catch{ toast('Erro rede upload','err'); }
-      finally { fileInput.value=''; }
-    });
-  }
-
-  async function loadInitial(){
-    const sessionId = localStorage.getItem('session_id');
-    if(!sessionId) return;
-    
-    // Carregar contatos salvos primeiro
-    await loadContacts();
-    
-    // aguardar até estado open (tentativa leve)
-    try {
-      const st = await fetch(`/sessions/${encodeURIComponent(sessionId)}/status`).then(r=>r.ok?r.json():null);
-      if(!st || st.state!=='open'){ /* não bloqueia, ainda assim tenta buscar novas */ }
-    } catch {}
-    let data=[]; try { const r=await fetch(`/sessions/${encodeURIComponent(sessionId)}/messages?limit=500`); if(r.ok){ const j=await r.json(); data=j.messages||[] } } catch {}
-    // Normalizar e agrupar
-    data.forEach(m=>{
-      const jid = m.fromMe ? (m.to || m.from) : m.from;
-      if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
-      messagesByJid.get(jid).push({ id:m.id, text:m.text||'', fromMe:!!m.fromMe, timestamp:m.timestamp||Date.now() });
-    });
-    // Construir chats
-    messagesByJid.forEach((arr,jid)=>{
-      const lastMsg = arr.slice().sort((a,b)=>b.timestamp-a.timestamp)[0];
-      chatsMap.set(jid, { id: jid, name: jid, last: lastMsg?.text?.slice(0,60)||'', time: formatTime(lastMsg?.timestamp), unread:0, starred:false, timestamp: lastMsg?.timestamp||0 })
-    });
-    renderChatList();
-    // Restaurar último chat
-    const restoreId=localStorage.getItem(LS_CHAT_KEY);
-    if(restoreId && chatsMap.has(restoreId)) selectChat(restoreId);
-  }
-
-  function formatTime(ts){ if(!ts) return ''; const d=new Date(ts); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
-
-  loadInitial();
-  renderChatList();
-  // ====== Tempo real (SSE) - Passo 2 ======
-  let evtSource=null;
-  let sseRetry=0;
-  function startSSE(){
-    const sessionId = localStorage.getItem('session_id');
-    if(!sessionId){ return; }
-    if(evtSource){ evtSource.close(); }
-    const url = `/sessions/${encodeURIComponent(sessionId)}/stream`;
-    try {
-      evtSource = new EventSource(url);
-    } catch (e){ console.warn('SSE init falhou', e); scheduleReconnect(); return; }
-    evtSource.onopen = ()=>{ sseRetry=0; console.log('SSE aberto'); };
-    evtSource.onerror = (e)=>{ console.warn('SSE erro', e); evtSource && evtSource.close(); scheduleReconnect(); };
-    evtSource.onmessage = (e)=>{
-      if(!e.data) return;
-      let payload; try{ payload=JSON.parse(e.data); }catch{return;}
-      handleSSE(payload);
-    };
-  }
-  function scheduleReconnect(){
-    sseRetry = Math.min(sseRetry+1, 6); // limite ~6 -> backoff ~32s max
-    const delay = Math.min(1000 * Math.pow(2, sseRetry), 30000);
-    setTimeout(()=>startSSE(), delay);
-  }
-  function handleSSE(ev){
-    if(ev.type==='ready'){ return; }
-    if(ev.type==='contact_upsert'){ // novo contato salvo
-      const contact = ev.contact || ev;
-      if(contact.jid && contact.name) {
-        contactsMap.set(contact.jid, {
-          name: contact.name,
-          is_group: contact.is_group || false
-        });
-        // Re-renderizar lista para atualizar nomes se necessário
-        renderChatList();
-        // Se é o chat ativo, atualizar cabeçalho também
-        if(currentChat && currentChat.id === contact.jid) {
-          peerName.textContent = formatContactName(contact.jid);
-        }
-      }
-      return;
-    }
-    if(ev.type==='message'){ // nova mensagem
-      const m = ev.message || ev;
-      const jid = m.fromMe ? (m.to || m.from) : m.from;
-      if(!messagesByJid.has(jid)) messagesByJid.set(jid, []);
-      
-      // Evitar duplicados baseado no ID da mensagem
-      const existingMsgs = messagesByJid.get(jid);
-      if(existingMsgs.some(x => x.id === m.id)){
-        console.log('Mensagem duplicada ignorada:', m.id);
+      // Validate input
+      if (!validateInput(text, 'message', 4096)) {
+        toast('Mensagem inválida ou muito longa', 'error');
         return;
       }
       
-      existingMsgs.push({ 
-        id: m.id, 
-        text: m.text || '', 
-        fromMe: !!m.fromMe, 
-        timestamp: m.timestamp || Date.now(),
-        mediaInfo: m.mediaInfo || null
+      // Add message optimistically
+      addMessage({
+        id: 'temp-' + Date.now(),
+        text,
+        fromMe: true,
+        timestamp: Date.now(),
+        pending: true
       });
       
-      // Reconciliação otimista melhorada: usar timestamp e texto para matching
-      if(m.fromMe && currentChat && currentChat.id === jid){
-        const pendings = [...messagesEl.querySelectorAll('.msg.out.pending')];
-        const msgText = (m.text || '').trim();
-        
-        // Procurar pending message com texto similar nos últimos 30 segundos
-        for(let i = pendings.length - 1; i >= 0; i--){
-          const el = pendings[i];
-          const elText = (el.textContent || '').trim();
-          const elTime = parseInt(el.dataset.timestamp) || 0;
-          const timeDiff = Math.abs((m.timestamp || Date.now()) - elTime);
-          
-          if(elText === msgText && timeDiff < 30000){ // 30s window
-            el.classList.remove('pending');
-            el.setAttribute('data-id', m.id);
-            console.log('Reconciliação otimista bem sucedida:', m.id);
-            break;
-          }
-        }
-      }
-      // atualizar chat
-      const arr = messagesByJid.get(jid);
-      const lastMsg = arr.slice().sort((a,b)=>b.timestamp-a.timestamp)[0];
-      let chat = chatsMap.get(jid);
-      if(!chat){ chat = { id:jid, name:jid, last:'', time:'', unread:0, starred:false, timestamp:0 }; chatsMap.set(jid, chat); }
-      chat.last = lastMsg?.text?.slice(0,60)||'';
-      chat.timestamp = lastMsg?.timestamp||Date.now();
-      chat.time = formatTime(chat.timestamp);
-      // unread se não está aberto e mensagem é inbound
-      if(!(currentChat && currentChat.id===jid) && !m.fromMe){ chat.unread = (chat.unread||0)+1; }
-      // se chat aberto, render incremental
-      if(currentChat && currentChat.id===jid){
-        // só adicionar se não reconciliado (sem elemento com data-id)
-        if(!messagesEl.querySelector(`[data-id="${m.id}"]`)){
-          pushMsg(m.fromMe?'out':'in', m.text||'', m.id, m.mediaInfo);
-        }
-      }
-      renderChatList();
-      return;
-    }
-    if(ev.type==='message_status'){ // apenas poderia atualizar UI futura (ticks)
-      // placeholder: no momento ignorado, mas poderíamos alterar classe visual
-      return;
-    }
-  }
-  // iniciar SSE após pequeno atraso para garantir session_id e histórico
-  setTimeout(startSSE, 800);
-  
-  // ===== MOBILE INITIALIZATION =====
-  // Garantir que mobile sempre comece na view de chats (lista)
-  function initializeMobileView() {
-    const app = document.getElementById('app');
-    const isMobile = window.matchMedia('(max-width:1023px)').matches;
-    
-    if (isMobile) {
-      // Mobile deve sempre começar mostrando lista de chats
-      delete app.dataset.view; // Remove data-view="chat" se existir
+      elements.messageInput.value = '';
+      autoResize();
       
-      // Garantir que botão voltar está escondido inicialmente
-      const backBtn = document.getElementById('back');
-      if (backBtn) backBtn.style.display = 'none';
-    }
-  }
-  
-  // Executar na inicialização e quando a tela muda de tamanho
-  initializeMobileView();
-  window.addEventListener('resize', initializeMobileView);
-  
-  // ==== Modal utilities & feature mocks ====
-  function $(s,root=document){return root.querySelector(s)}
-  function show(id){ $(id).classList.add('show') }
-  function hide(el){ el.classList.remove('show') }
-  document.querySelectorAll('.modal [data-close]')?.forEach(b=>b.addEventListener('click',e=>hide(e.target.closest('.modal'))))
-
-  // Open modals
-  $('#menu-flow')?.addEventListener('click', ()=>show('#mdl-flow'))
-  $('#menu-qr')?.addEventListener('click', ()=>{ showProfile(); })
-  $('#menu-schedule')?.addEventListener('click', ()=>show('#mdl-schedule'))
-  $('#menu-tags')?.addEventListener('click', ()=>show('#mdl-tags'))
-
-  // ====== Nova lógica QR ======
-  function getSessionId(){ return localStorage.getItem('sessionId') || localStorage.getItem('session_id') || '' }
-  // Reuso de variáveis globais se já definidas anteriormente
-  if(typeof qrPollTimer==='undefined'){ window.qrPollTimer=null; }
-  let qrStatusTimer=null;
-  function clearQRTimers(){ if(qrPollTimer) clearTimeout(qrPollTimer); if(qrStatusTimer) clearTimeout(qrStatusTimer); }
-  async function fetchStatus(id){ try{ const r=await fetch(`/sessions/${encodeURIComponent(id)}/status`); if(!r.ok) return null; return await r.json(); }catch{ return null } }
-  async function fetchQR(){ try{ const r=await fetch('/me/session/qr'); if(!r.ok) return null; const j=await r.json(); return j.dataUrl }catch{ return null } }
-  async function ensureSessionCreated(id){ try { await fetch('/sessions/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:id})}) } catch {} }
-  async function startManual(id){ try { const r=await fetch(`/sessions/${encodeURIComponent(id)}/start`,{method:'POST'}); return r.ok } catch { return false } }
-  function setQRState(s){ const el=document.getElementById('qr-state'); if(el) el.textContent=s||'—'; }
-  function showEl(id,show){ const el=document.getElementById(id); if(el) el.style.display=show? 'block':'none'; }
-  async function pollQRImage(){ const imgEl=document.getElementById('qr-image'); const wrap=document.getElementById('qr-image-wrap'); if(!imgEl||!wrap) return; const code=await fetchQR(); if(code){ imgEl.src=code; wrap.style.display='block'; } else { wrap.style.display='none'; } qrPollTimer=setTimeout(pollQRImage,6000); }
-  async function pollStatusLoop(){ const id=getSessionId(); if(!id) return; const st=await fetchStatus(id); if(st){ setQRState(st.state); updateQRUIForState(st.state); } qrStatusTimer=setTimeout(pollStatusLoop,5000); }
-  function updateQRUIForState(state){ const connected=document.getElementById('qr-connected'); const imgWrap=document.getElementById('qr-image-wrap'); const btnStart=document.getElementById('qr-start'); const btnRegen=document.getElementById('qr-regen'); const btnClean=document.getElementById('qr-clean'); const btnOpenTab=document.getElementById('qr-open-newtab'); const manual = window.MANUAL_PAIRING==='1';
-    if(state==='open'){ connected.style.display='block'; imgWrap.style.display='none'; btnStart.style.display='none'; btnRegen.style.display= manual? 'inline-block':'none'; btnClean.style.display='inline-block'; btnOpenTab.style.display='none'; clearTimeout(qrPollTimer); }
-    else if(state==='pairing'){ connected.style.display='none'; btnStart.style.display='none'; btnRegen.style.display= manual? 'inline-block':'none'; btnClean.style.display='inline-block'; btnOpenTab.style.display='inline-block'; pollQRImage(); }
-    else { // idle / closed / undefined
-      connected.style.display='none'; imgWrap.style.display='none'; btnRegen.style.display='none'; btnOpenTab.style.display='none'; btnClean.style.display='inline-block'; btnStart.style.display= manual? 'inline-block':'none'; if(!manual){ // auto criar
-          const id=getSessionId(); if(id){ ensureSessionCreated(id); }
-        }
-    }
-  }
-  async function openQRModal(){ const modal=document.getElementById('mdl-qr'); if(!modal) return; modal.classList.add('show'); clearQRTimers(); const id=getSessionId(); if(!id){ setQRState('sem sessão'); return; } setQRState('carregando...'); const prof = await fetch('/me/profile').then(r=>r.ok?r.json():null).catch(()=>null); const state = prof?.session?.state; if(!state){ await ensureSessionCreated(id); }
-    updateQRUIForState(state||'idle'); pollStatusLoop(); if(state==='pairing'){ pollQRImage(); } }
-  document.getElementById('qr-start')?.addEventListener('click', async ()=>{ const id=getSessionId(); if(!id) return toast('Sem sessão','err'); const ok=await startManual(id); if(!ok) return toast('Falha iniciar','err'); setQRState('pairing'); updateQRUIForState('pairing'); pollQRImage(); })
-  document.getElementById('qr-regen')?.addEventListener('click', async ()=>{ const id=getSessionId(); if(!id) return; await fetch(`/sessions/${encodeURIComponent(id)}/qr/regenerate`,{method:'POST'}).catch(()=>{}); toast('Solicitado novo QR'); })
-  document.getElementById('qr-clean')?.addEventListener('click', async ()=>{ await fetch('/me/session/clean',{method:'POST'}).catch(()=>{}); toast('Sessão limpa'); clearQRTimers(); setQRState('idle'); updateQRUIForState('idle'); })
-  document.getElementById('qr-open-newtab')?.addEventListener('click', ()=>{ const id=getSessionId(); if(!id) return; window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank'); })
-
-  // === Flows (API) ===
-  async function createFlow(){
-    const name = $('#flow-name')?.value?.trim()||'Fluxo'
-    let nodes; try{ nodes = JSON.parse($('#flow-json')?.value || '[]') }catch{ return toast('JSON inválido','err') }
-    try {
-      const r=await fetch('/flows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,nodes})})
-      if(!r.ok) return toast('Erro ao salvar fluxo','err')
-      toast('Fluxo salvo'); hide($('#mdl-flow'))
-    } catch { toast('Erro rede','err') }
-  }
-  $('#flow-save')?.addEventListener('click', createFlow)
-
-  // === Schedules (API) ===
-  async function fetchSchedules(){
-    try{ const r=await fetch('/schedules'); if(!r.ok) return []; const j=await r.json(); return j.schedules||[] }catch{return []}
-  }
-  async function renderSchedules(){ const box = $('#sched-list'); if(!box) return; const arr = await fetchSchedules(); box.innerHTML = arr.length? arr.map(s=>`• ${new Date(s.when).toLocaleString()} → ${s.to}: "${s.text}" <span style='opacity:.6'>(${s.status})</span>`).join('<br>') : 'Sem agendamentos.' }
-  renderSchedules()
-  $('#sched-save')?.addEventListener('click', async ()=>{
-  const session_id = localStorage.getItem('sessionId') || localStorage.getItem('session_id') || ''
-    const to = $('#sched-to')?.value?.trim()
-    const text = $('#sched-text')?.value?.trim()
-    const when = $('#sched-when')?.value
-    if(!session_id||!to||!text||!when) return toast('Preencha todos os campos','err')
-    try{
-      const r=await fetch('/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id,to,text,when})})
-      if(!r.ok) return toast('Erro ao agendar','err')
-      toast('Agendado')
-      renderSchedules()
-    }catch{ toast('Erro rede','err') }
-  })
-
-  // === Tags (API) ===
-  async function fetchTags(){ try{ const r=await fetch('/tags'); if(!r.ok) return {}; const j=await r.json(); return j.tags||{} }catch{return {}} }
-  async function renderTags(){ const box = $('#tag-list'); if(!box) return; const t = await fetchTags(); box.innerHTML = Object.keys(t).length? Object.entries(t).map(([k,v])=>`• ${k}: ${v}`).join('<br>') : 'Sem etiquetas.' }
-  renderTags()
-  $('#tag-save')?.addEventListener('click', async ()=>{
-    const id = $('#tag-msg-id')?.value?.trim()
-    const label = $('#tag-label')?.value?.trim()
-    if(!id||!label) return toast('Informe id e etiqueta','err')
-    try {
-      const r=await fetch('/tags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,label})})
-      if(!r.ok) return toast('Erro ao etiquetar','err')
-      toast('Etiqueta aplicada'); renderTags();
-    } catch { toast('Erro rede','err') }
-  })
-
-  // toast util fallback
-  if(typeof toast!=='function'){
-    window.toast = function(msg,type='ok'){
-      const t=document.createElement('div');t.className='toast '+type; t.textContent=msg; document.body.appendChild(t);
-      requestAnimationFrame(()=>t.classList.add('show')); setTimeout(()=>{t.classList.remove('show'); setTimeout(()=>t.remove(),200)},2500)
-    }
-  }
-
-  // === Theme Toggle ===
-  (function(){
-    const btn=document.getElementById('theme-toggle');
-    if(!btn) return;
-    const root=document.documentElement;
-    const KEY='theme_pref';
-    function apply(t){ if(t==='light'){ root.setAttribute('data-theme','light'); btn.setAttribute('aria-label','Usar tema escuro'); } else { root.removeAttribute('data-theme'); btn.setAttribute('aria-label','Usar tema claro'); } }
-    let pref=localStorage.getItem(KEY);
-    if(!pref){
-      // auto detect system
-      pref=window.matchMedia('(prefers-color-scheme: light)').matches? 'light':'dark';
-    }
-    apply(pref);
-    btn.addEventListener('click',()=>{
-      pref = (root.getAttribute('data-theme')==='light')? 'dark':'light';
-      localStorage.setItem(KEY,pref);
-      apply(pref);
-    });
-  })();
-
-  // Hamburger dropdown
-  (function(){
-    const wrap=document.getElementById('hamb-menu');
-    const btn=document.getElementById('hamb-btn');
-    if(!wrap||!btn) return;
-    const toggle=()=>{ const open=wrap.classList.toggle('show'); btn.setAttribute('aria-expanded', String(open)); }
-    btn.addEventListener('click', toggle);
-    document.addEventListener('click',(e)=>{ if(!wrap.contains(e.target)){ wrap.classList.remove('show'); btn.setAttribute('aria-expanded','false'); } })
-  })();
-  </script>
-
-  <!-- Fluxo IA -->
-  <div class="modal" id="mdl-flow">
-    <div class="modal-card">
-      <div class="modal-h"><strong>Fluxo IA</strong><button class="m-btn" data-close>✕</button></div>
-      <div class="modal-b">
-        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap" id="flow-tabs">
-          <button type="button" class="chip is-active" data-tab="chatbot">Criar Chatbot</button>
-          <button type="button" class="chip" data-tab="iaform">Formulário IA</button>
-        </div>
-        <div id="tab-chatbot">
-          <p class="help">Defina sequência de perguntas e respostas do chatbot (estrutura simples).</p>
-          <div class="row"><span class="label">Nome</span><input class="input" id="cb-name" placeholder="Ex. Recepção"></div>
-          <div class="row" style="align-items:flex-start"><span class="label">Blocos</span>
-            <div style="flex:1" id="cb-blocks"></div>
-          </div>
-          <button type="button" class="m-btn" id="cb-add">Adicionar bloco</button>
-          <div class="help">Cada bloco: pergunta feita ao cliente e resposta padrão ou próxima ação.</div>
-        </div>
-        <div id="tab-iaform" style="display:none">
-          <p class="help">Texto base usado pela IA antes de responder. Complementa a Base de Conhecimento.</p>
-          <textarea class="input" id="ia-free" rows="10" placeholder="Insira informações adicionais do negócio..."></textarea>
-          <div class="help">Salve para atualizar o contexto. Use este campo para campanhas, políticas temporárias etc.</div>
-        </div>
-      </div>
-      <div class="modal-f" id="flow-actions">
-        <button class="m-btn" data-close>Fechar</button>
-        <button class="btn" id="flow-save">Salvar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Conectar QR (reutiliza sessão existente) -->
-  <div class="modal" id="mdl-qr">
-    <div class="modal-card">
-      <div class="modal-h"><strong>Conectar QR</strong><button class="m-btn" data-close>✕</button></div>
-      <div class="modal-b" style="display:flex;flex-direction:column;gap:12px;">
-        <div>Estado: <span id="qr-state">—</span></div>
-        <div id="qr-connected" style="display:none;color:#69e4a6;font-weight:600;">Sessão conectada ✅</div>
-        <div id="qr-image-wrap" style="display:none;text-align:center;">
-          <img id="qr-image" alt="QR" style="max-width:240px;border:1px solid var(--wa-border);padding:6px;border-radius:8px;background:var(--wa-panel)" />
-          <p class="help" style="margin-top:6px;">Escaneie no WhatsApp para conectar.</p>
-        </div>
-        <div class="help" id="qr-hint">A sessão é ligada ao seu usuário. Reabrir este modal mostra o status atual.</div>
-      </div>
-      <div class="modal-f" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn" id="qr-start" style="display:none;">Iniciar sessão</button>
-          <button class="btn outline" id="qr-regen" style="display:none;">Regenerar QR</button>
-          <button class="btn outline" id="qr-open-newtab" style="display:none;">Abrir em aba</button>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn outline" id="qr-clean" style="display:none;">Desvincular</button>
-          <button class="m-btn" data-close>Fechar</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Agendar envios -->
-  <div class="modal" id="mdl-schedule">
-    <div class="modal-card">
-      <div class="modal-h"><strong>Agendar envios</strong><button class="m-btn" data-close>✕</button></div>
-      <div class="modal-b">
-        <div class="row"><span class="label">Session ID</span><input class="input" id="sched-session" placeholder="Ex. santemoda-01"></div>
-        <div class="row"><span class="label">Para (JID)</span><input class="input" id="sched-to" placeholder="5511999999999@s.whatsapp.net"></div>
-        <div class="row"><span class="label">Mensagem</span><input class="input" id="sched-text" placeholder="Texto da campanha"></div>
-        <div class="row"><span class="label">Quando</span><input class="input" id="sched-when" type="datetime-local"></div>
-        <div class="help">Mock local: salva no localStorage e executa no horário via setTimeout (enquanto a página estiver aberta).</div>
-        <div id="sched-list" class="help"></div>
-      </div>
-      <div class="modal-f"><button class="m-btn" data-close>Fechar</button><button class="btn" id="sched-save">Agendar</button></div>
-    </div>
-  </div>
-
-  <!-- Etiquetar mensagem -->
-  <div class="modal" id="mdl-tags">
-    <div class="modal-card">
-      <div class="modal-h"><strong>Etiquetar mensagem</strong><button class="m-btn" data-close>✕</button></div>
-      <div class="modal-b">
-        <div class="row"><span class="label">ID da msg</span><input class="input" id="tag-msg-id" placeholder="ex. key.id"></div>
-        <div class="row"><span class="label">Etiqueta</span><input class="input" id="tag-label" placeholder="Prioridade, VIP, Suporte..."></div>
-        <div class="help">Mock: vamos manter um map de etiquetas em localStorage (msgId -> tag).</div>
-        <div id="tag-list" class="help"></div>
-      </div>
-      <div class="modal-f"><button class="m-btn" data-close>Fechar</button><button class="btn" id="tag-save">Aplicar etiqueta</button></div>
-    </div>
-  </div>
-
-  <!-- Late binding script to ensure modal elements exist -->
-  <script>
-  (function(){
-    // Re-bind close buttons with event delegation (in case initial binding missed due to DOM order)
-    document.addEventListener('click', (e)=>{
-      const t = e.target;
-      if(t && t.matches && t.matches('.modal [data-close]')){
-        const modal = t.closest('.modal');
-        if(modal) modal.classList.remove('show');
-      }
-    });
-
-    // Safe query helper (JS only)
-  function $(s, r){ return (r||document).querySelector(s); }
-
-    // If earlier listeners failed (elements absent), attach now.
-    $('#qr-open')?.getAttribute('data-bound') || $('#qr-open')?.addEventListener('click', async ()=>{
-      const el = $('#qr-session');
-      const id = localStorage.getItem('sessionId') || localStorage.getItem('session_id') || '';
-      if(!id) return toast('Faça login antes','err');
       try {
-        await fetch('/sessions/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:id})});
-        window.open(`/qr.html?session_id=${encodeURIComponent(id)}`,'_blank');
-      } catch { toast('Erro ao criar sessão','err'); }
-    });
-
-    $('#flow-save')?.getAttribute('data-bound') || $('#flow-save')?.addEventListener('click', async ()=>{
-      // Determine active tab
-      const activeTab = document.querySelector('#flow-tabs .chip.is-active')?.getAttribute('data-tab');
-      if(activeTab==='chatbot'){
-        const nameEl = document.getElementById('cb-name');
-        const name = nameEl && nameEl.value ? nameEl.value.trim() : 'Fluxo';
-        // Collect blocks
-        const blocks = [];
-        document.querySelectorAll('.cb-block').forEach((blk,i)=>{
-          const qEl = blk.querySelector('[data-q]');
-          const aEl = blk.querySelector('[data-a]');
-          const q = qEl && qEl.value ? qEl.value.trim() : '';
-          const a = aEl && aEl.value ? aEl.value.trim() : '';
-          if(q||a){ blocks.push({ id:'b'+i, question:q||'', answer:a||'' }) }
+        const response = await fetch('/messages/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: state.sessionId,
+            to: state.currentChat,
+            text
+          })
         });
-        try{
-          const r=await fetch('/flows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,nodes:blocks})});
-          if(!r.ok) return toast('Erro ao salvar fluxo','err');
-          toast('Fluxo salvo');
-          if(nameEl) nameEl.value='';
-          const blkWrap = document.getElementById('cb-blocks');
-          if(blkWrap) blkWrap.innerHTML='';
-        }catch{ toast('Erro rede','err') }
-      } else if(activeTab==='iaform') {
-        const extraEl = document.getElementById('ia-free');
-        const extra = extraEl && extraEl.value ? extraEl.value : '';
-        // Merge with existing knowledge file (append at end under heading)
-        try {
-          const k= await fetch('/knowledge');
-          const base = k.ok? (await k.json()).content : '';
-          let updated = base;
-          const marker = '\n\n# Extra IA';
-          if(base.includes('# Extra IA')){
-            updated = base.replace(/(# Extra IA[\s\S]*)$/,'# Extra IA\n'+extra.trim()+"\n");
-          } else {
-            updated = base.trim()+ marker + '\n'+ extra.trim()+'\n';
-          }
-          const r=await fetch('/knowledge',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:updated})});
-          if(!r.ok) return toast('Erro ao salvar IA','err');
-          toast('Contexto IA salvo');
-        }catch{ toast('Erro rede','err') }
+        
+        if (!response.ok) {
+          throw new Error('Falha ao enviar mensagem');
+        }
+      } catch (error) {
+        toast('Erro ao enviar mensagem', 'error');
+        console.error('Send error:', error);
       }
-    });
-
-    $('#sched-save')?.getAttribute('data-bound') || $('#sched-save')?.addEventListener('click', async ()=>{
-      const sEl=$('#sched-session'); const toEl=$('#sched-to'); const txtEl=$('#sched-text'); const whenEl=$('#sched-when');
-      const session_id = (sEl && sEl.value ? sEl.value.trim() : '') || localStorage.getItem('session_id') || '';
-      const to = toEl && toEl.value ? toEl.value.trim() : '';
-      const text = txtEl && txtEl.value ? txtEl.value.trim() : '';
-      const when = whenEl && whenEl.value ? whenEl.value : '';
-      if(!session_id||!to||!text||!when) return toast('Preencha todos os campos','err');
-      try{ const r=await fetch('/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id,to,text,when})}); if(!r.ok) return toast('Erro ao agendar','err'); toast('Agendado'); }catch{ toast('Erro rede','err') }
-    });
-
-    $('#tag-save')?.getAttribute('data-bound') || $('#tag-save')?.addEventListener('click', async ()=>{
-      const idEl=$('#tag-msg-id'); const labelEl=$('#tag-label');
-      const id = idEl && idEl.value ? idEl.value.trim() : '';
-      const label = labelEl && labelEl.value ? labelEl.value.trim() : '';
-      if(!id||!label) return toast('Informe id e etiqueta','err');
-      try{ const r=await fetch('/tags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,label})}); if(!r.ok) return toast('Erro ao etiquetar','err'); toast('Etiqueta aplicada'); }catch{ toast('Erro rede','err') }
-    });
-
-    // Menu open bindings safeguard (in case earlier script ran too early somehow)
-    $('#menu-flow')?.addEventListener('click', ()=>$('#mdl-flow')?.classList.add('show'))
-  $('#menu-qr')?.addEventListener('click', showProfile)
-    $('#menu-schedule')?.addEventListener('click', ()=>$('#mdl-schedule')?.classList.add('show'))
-    $('#menu-tags')?.addEventListener('click', ()=>$('#mdl-tags')?.classList.add('show'))
-
-    // Tabs handling
-    const tabs=document.getElementById('flow-tabs');
-    tabs?.addEventListener('click',(e)=>{
-      const t=e.target;
-      if(!(t && t.closest)) return;
-      const chip = t.closest('.chip');
-      if(!chip) return;
-      tabs.querySelectorAll('.chip').forEach(c=>c.classList.remove('is-active'));
-      chip.classList.add('is-active');
-      const tab = chip.getAttribute('data-tab');
-      const tabChat = document.getElementById('tab-chatbot');
-      const tabIA = document.getElementById('tab-iaform');
-      if(tabChat) tabChat.style.display = tab==='chatbot'? 'block':'none';
-      if(tabIA) tabIA.style.display = tab==='iaform'? 'block':'none';
-      if(tab==='iaform') loadIAExtra();
-    });
-
-    // Chatbot block builder
-    function addBlock(q='',a=''){
-      const wrap=document.createElement('div');
-      wrap.className='cb-block';
-      wrap.style.cssText='border:1px solid var(--wa-border);padding:10px;border-radius:10px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px;background:var(--wa-panel)';
-      wrap.innerHTML=`<input data-q class="input" placeholder="Pergunta" value="${q}" />\n<textarea data-a class="input" rows="2" placeholder="Resposta"></textarea>\n<button type="button" class="m-btn cb-del">Remover</button>`;
-      const del = wrap.querySelector('.cb-del'); if(del) del.addEventListener('click',()=>wrap.remove());
-      const ans = wrap.querySelector('[data-a]'); if(ans) ans.value=a;
-      const blocksContainer=document.getElementById('cb-blocks');
-      if(blocksContainer) blocksContainer.appendChild(wrap);
     }
-    document.getElementById('cb-add')?.addEventListener('click',()=>addBlock());
 
-    // Load IA extra section into textarea
-    async function loadIAExtra(){
-      try{
-        const r=await fetch('/knowledge'); if(!r.ok) return;
-        const j=await r.json();
-        const match = j.content.match(/# Extra IA[\r\n]+([\s\S]*)$/);
-        const iaFree = document.getElementById('ia-free');
-        if(iaFree) iaFree.value = match? match[1].trim():'';
-      }catch{}
+    // Load chats from server
+    async function loadChats() {
+      if (!state.sessionId) return;
+      
+      try {
+        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/messages?limit=100`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const messages = data.messages || [];
+        
+        // Group messages by contact
+        const chatMap = new Map();
+        messages.forEach(msg => {
+          const jid = msg.fromMe ? (msg.to || msg.from) : msg.from;
+          if (!chatMap.has(jid)) {
+            chatMap.set(jid, {
+              id: jid,
+              name: formatContactName(jid),
+              messages: [],
+              lastMessage: null,
+              timestamp: 0
+            });
+          }
+          
+          const chat = chatMap.get(jid);
+          chat.messages.push(msg);
+          if (msg.timestamp > chat.timestamp) {
+            chat.lastMessage = msg;
+            chat.timestamp = msg.timestamp;
+          }
+        });
+        
+        state.chats = chatMap;
+        renderChatList();
+      } catch (error) {
+        console.error('Load chats error:', error);
+      }
     }
-  })();
-  </script>
-  
-  <script src="/virtual-scroller.js"></script>
-  <script src="/lazy-loader.js"></script>
-  <script src="/api-batch-manager.js"></script>
-  <script src="/mobile-gestures.js"></script>
-  <script src="/push-notifications.js"></script>
-  
-  <script>
-    // Service Worker Registration  
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', async () => {
+
+    // Render chat list
+    function renderChatList() {
+      const chats = Array.from(state.chats.values())
+        .sort((a, b) => b.timestamp - a.timestamp);
+      
+      elements.chatList.innerHTML = chats.map(chat => `
+        <div class="chat-item" onclick="selectChat('${chat.id}')">
+          <div class="chat-avatar">${getInitials(chat.name)}</div>
+          <div class="chat-meta">
+            <div class="chat-header">
+              <div class="chat-name">${escapeHtml(chat.name)}</div>
+              <div class="chat-time">${formatTime(chat.timestamp)}</div>
+            </div>
+            <div class="chat-subtitle">
+              ${escapeHtml(chat.lastMessage?.text || 'Sem mensagens')}
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Select chat
+    function selectChat(chatId) {
+      state.currentChat = chatId;
+      
+      // Update UI
+      document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      event.target.closest('.chat-item').classList.add('active');
+      
+      // Show chat header and composer
+      elements.chatHeader.style.display = 'flex';
+      elements.composer.style.display = 'flex';
+      
+      // Update chat info
+      const chat = state.chats.get(chatId);
+      if (chat) {
+        elements.currentName.textContent = chat.name;
+        elements.currentAvatar.textContent = getInitials(chat.name);
+        elements.currentStatus.textContent = 'Online';
+        
+        // Load messages
+        loadMessages(chatId);
+      }
+      
+      // Hide empty state
+      elements.messagesContainer.querySelector('.empty-state').style.display = 'none';
+    }
+
+    // Load messages for chat
+    function loadMessages(chatId) {
+      const chat = state.chats.get(chatId);
+      if (!chat) return;
+      
+      elements.messagesContainer.innerHTML = '';
+      chat.messages.forEach(msg => addMessage(msg));
+      scrollToBottom();
+    }
+
+    // Add message to UI
+    function addMessage(message) {
+      const messageEl = document.createElement('div');
+      messageEl.className = `message ${message.fromMe ? 'outgoing' : 'incoming'}`;
+      if (message.pending) messageEl.classList.add('pending');
+      
+      messageEl.innerHTML = `
+        <div class="message-bubble">
+          <div class="message-text">${escapeHtml(message.text)}</div>
+          <div class="message-time">${formatTime(message.timestamp)}</div>
+        </div>
+      `;
+      
+      elements.messagesContainer.appendChild(messageEl);
+      scrollToBottom();
+    }
+
+    // Utility functions
+    function formatContactName(jid) {
+      const phone = jid.includes('@') ? jid.split('@')[0] : jid;
+      if (phone.startsWith('55') && phone.length >= 12) {
+        const ddd = phone.substring(2, 4);
+        const number = phone.substring(4);
+        const part1 = number.substring(0, number.length - 4);
+        const part2 = number.substring(number.length - 4);
+        return `+55 (${ddd}) ${part1}-${part2}`;
+      }
+      return `+${phone}`;
+    }
+
+    function getInitials(name) {
+      return name.split(' ')
+        .map(word => word.charAt(0).toUpperCase())
+        .join('')
+        .substring(0, 2);
+    }
+
+    function formatTime(timestamp) {
+      if (!timestamp) return '';
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function scrollToBottom() {
+      elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+    }
+
+    // Status polling
+    async function startStatusPolling() {
+      if (!state.sessionId) return;
+      
+      try {
+        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/status`);
+        if (response.ok) {
+          const status = await response.json();
+          updateStatus(status.state === 'open');
+        }
+      } catch (error) {
+        updateStatus(false);
+      }
+      
+      setTimeout(startStatusPolling, 5000);
+    }
+
+    function updateStatus(online) {
+      elements.statusDot.classList.toggle('online', online);
+      elements.statusText.textContent = online ? 'Online' : 'Offline';
+    }
+
+    // SSE for real-time messages
+    function startSSE() {
+      if (!state.sessionId) return;
+      
+      const eventSource = new EventSource(`/sessions/${encodeURIComponent(state.sessionId)}/stream`);
+      
+      eventSource.addEventListener('message', (event) => {
         try {
-          const registration = await navigator.serviceWorker.register('/sw.js', {
-            scope: '/'
-          })
-          
-          console.log('✅ Service Worker registrado:', registration.scope)
-          
-          // Escutar mensagens do SW
-          navigator.serviceWorker.addEventListener('message', event => {
-            const { type, data } = event.data
-            
-            if (type === 'message-sent') {
-              console.log('📤 Mensagem enviada via background sync:', data)
-              // Atualizar UI se necessário
-            }
-          })
-          
+          const message = JSON.parse(event.data);
+          handleNewMessage(message);
         } catch (error) {
-          console.error('❌ Erro ao registrar Service Worker:', error)
+          console.error('SSE message error:', error);
         }
-      })
+      });
+      
+      eventSource.onerror = () => {
+        setTimeout(startSSE, 3000);
+      };
     }
-    
-    // PWA Install Banner
-    let deferredPrompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault()
-      deferredPrompt = e
+
+    function handleNewMessage(message) {
+      const jid = message.fromMe ? (message.to || message.from) : message.from;
       
-      // Mostrar botão de instalação customizado
-      const installBanner = document.createElement('div')
-      installBanner.className = 'install-banner'
-      installBanner.innerHTML = `
-        <div class="install-content">
-          <span>📱 Instalar ZapSan como app?</span>
-          <button onclick="installPWA()" class="install-btn">Instalar</button>
-          <button onclick="dismissInstallBanner()" class="dismiss-btn">×</button>
-        </div>
-      `
+      // Update chat in list
+      if (!state.chats.has(jid)) {
+        state.chats.set(jid, {
+          id: jid,
+          name: formatContactName(jid),
+          messages: [],
+          lastMessage: null,
+          timestamp: 0
+        });
+      }
       
-      document.body.insertBefore(installBanner, document.body.firstChild)
-    })
-    
-    async function installPWA() {
-      if (deferredPrompt) {
-        deferredPrompt.prompt()
-        const result = await deferredPrompt.userChoice
+      const chat = state.chats.get(jid);
+      chat.messages.push(message);
+      chat.lastMessage = message;
+      chat.timestamp = message.timestamp || Date.now();
+      
+      renderChatList();
+      
+      // If current chat, add message
+      if (state.currentChat === jid) {
+        addMessage(message);
+      }
+    }
+
+    // WhatsApp Connection Functions
+    async function connectWhatsApp() {
+      if (!state.sessionId) {
+        toast('Session ID não encontrado', 'error');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/connect`, {
+          method: 'POST'
+        });
         
-        if (result.outcome === 'accepted') {
-          console.log('✅ PWA instalado')
+        if (response.ok) {
+          toast('Conectando...', 'info');
+          updateConnectionStatus();
+        } else {
+          throw new Error('Falha na conexão');
         }
-        
-        deferredPrompt = null
-        dismissInstallBanner()
+      } catch (error) {
+        console.error('Connect error:', error);
+        toast('Erro ao conectar', 'error');
       }
     }
     
-    function dismissInstallBanner() {
-      const banner = document.querySelector('.install-banner')
-      if (banner) banner.remove()
+    async function disconnectWhatsApp() {
+      if (!state.sessionId) return;
+      
+      try {
+        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/disconnect`, {
+          method: 'POST'
+        });
+        
+        if (response.ok) {
+          toast('Desconectado', 'info');
+          updateConnectionStatus();
+        }
+      } catch (error) {
+        console.error('Disconnect error:', error);
+        toast('Erro ao desconectar', 'error');
+      }
     }
     
-    // Integração otimizações móveis no app principal
-    document.addEventListener('DOMContentLoaded', () => {
-      // Virtual scrolling para listas de mensagens
-      const messagesList = document.querySelector('.messages-list')
-      if (messagesList && window.VirtualMessageScroller) {
-        const virtualScroller = new VirtualMessageScroller(messagesList, {
-          itemHeight: 65,
-          renderAhead: 15,
-          enableInfiniteScroll: true,
-          onLoadMore: async (offset, limit) => {
-            // Carregar mais mensagens da API
-            try {
-              const response = await window.api.get(`/messages?offset=${offset}&limit=${limit}`)
-              return response.messages || []
-            } catch {
-              return []
+    async function cleanWhatsApp() {
+      if (!state.sessionId) return;
+      
+      if (confirm('Tem certeza que deseja limpar a sessão? Isso desconectará o WhatsApp.')) {
+        try {
+          const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/clean`, {
+            method: 'POST'
+          });
+          
+          if (response.ok) {
+            toast('Sessão limpa', 'info');
+            updateConnectionStatus();
+          }
+        } catch (error) {
+          console.error('Clean error:', error);
+          toast('Erro ao limpar sessão', 'error');
+        }
+      }
+    }
+    
+    async function generateQRCode() {
+      if (!state.sessionId) {
+        toast('Session ID não encontrado', 'error');
+        return;
+      }
+      
+      const qrContainer = document.getElementById('qrCode');
+      qrContainer.innerHTML = '<div class="loading-spinner"></div><p>Gerando QR Code...</p>';
+      
+      try {
+        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/qr`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.qr) {
+            qrContainer.innerHTML = `<img src="data:image/png;base64,${data.qr}" class="qr-code-img" alt="QR Code">`;
+          } else {
+            qrContainer.innerHTML = '<p>QR Code não disponível</p>';
+          }
+        } else {
+          throw new Error('Falha ao gerar QR');
+        }
+      } catch (error) {
+        console.error('QR generation error:', error);
+        qrContainer.innerHTML = '<p>Erro ao gerar QR Code</p>';
+        toast('Erro ao gerar QR Code', 'error');
+      }
+    }
+    
+    async function updateConnectionStatus() {
+      if (!state.sessionId) return;
+      
+      try {
+        const response = await fetch(`/sessions/${encodeURIComponent(state.sessionId)}/status`);
+        if (response.ok) {
+          const status = await response.json();
+          
+          // Update profile drawer
+          const pfConn = document.getElementById('pfConn');
+          const pfState = document.getElementById('pfState');
+          const pfJid = document.getElementById('pfJid');
+          const btnConnect = document.getElementById('btnConnect');
+          const btnDisconnect = document.getElementById('btnDisconnect');
+          const btnClean = document.getElementById('btnClean');
+          
+          if (pfConn) {
+            pfConn.textContent = status.state === 'open' ? 'Online' : 'Offline';
+            pfConn.className = `connection-status ${status.state === 'open' ? 'online' : 'offline'}`;
+          }
+          
+          if (pfState) pfState.textContent = status.state || 'Desconhecido';
+          if (pfJid) pfJid.textContent = status.jid || 'Não conectado';
+          
+          // Update buttons
+          if (btnConnect && btnDisconnect && btnClean) {
+            if (status.state === 'open') {
+              btnConnect.style.display = 'none';
+              btnDisconnect.style.display = 'block';
+              btnClean.style.display = 'block';
+            } else {
+              btnConnect.style.display = 'block';
+              btnDisconnect.style.display = 'none';
+              btnClean.style.display = 'none';
             }
           }
-        })
+          
+          // Update main status
+          updateStatus(status.state === 'open');
+        }
+      } catch (error) {
+        console.error('Status update error:', error);
       }
-
-      // Lazy loading automático para imagens
-      if (window.lazyLoader) {
-        // Re-scan quando novo conteúdo for adicionado
-        const observer = new MutationObserver(() => {
-          window.lazyLoader.scanAndSetup()
-        })
-        observer.observe(document.body, { childList: true, subtree: true })
-      }
-
-      // Otimizar API calls com batching
-      if (window.api) {
-        // Substituir fetch global para usar sistema de batch
-        const originalFetch = window.fetch
-        window.fetch = function(url, options = {}) {
-          // Use batch system para GET requests
-          if (!options.method || options.method === 'GET') {
-            return window.api.get(url, options)
+    }
+    
+    // AI Flow Functions
+    async function loadAiSettings() {
+      try {
+        const response = await fetch('/ai/settings');
+        if (response.ok) {
+          const settings = await response.json();
+          
+          document.getElementById('aiEnabled').checked = settings.enabled || false;
+          document.getElementById('aiPrompt').value = settings.prompt || '';
+          document.getElementById('aiDelay').value = settings.delay || 3;
+          
+          const aiStatus = document.getElementById('aiStatus');
+          if (aiStatus) {
+            aiStatus.textContent = settings.enabled ? 'Ativo' : 'Inativo';
+            aiStatus.className = `status-badge ${settings.enabled ? 'online' : 'offline'}`;
           }
           
-          // Use batch system para POST requests
-          if (options.method === 'POST' && options.body) {
-            try {
-              const body = JSON.parse(options.body)
-              return window.api.post(url, body, options)
-            } catch {
-              return originalFetch(url, options)
-            }
+          // Load stats
+          if (settings.stats) {
+            document.getElementById('aiResponsesToday').textContent = settings.stats.today || 0;
+            document.getElementById('aiResponsesTotal').textContent = settings.stats.total || 0;
           }
-          
-          // Fallback para outros casos
-          return originalFetch(url, options)
         }
+      } catch (error) {
+        console.error('AI settings load error:', error);
       }
-
-      // Gestures móveis
-      if (window.MobileGestureHandler) {
-        const gestureHandler = new MobileGestureHandler(document.body)
+    }
+    
+    async function saveAiSettings() {
+      const settings = {
+        enabled: document.getElementById('aiEnabled').checked,
+        prompt: document.getElementById('aiPrompt').value.trim(),
+        delay: parseInt(document.getElementById('aiDelay').value) || 3
+      };
+      
+      try {
+        const response = await fetch('/ai/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings)
+        });
         
-        // Pull to refresh
-        gestureHandler.onPullToRefresh = () => {
-          location.reload()
+        if (response.ok) {
+          toast('Configurações de IA salvas', 'success');
+          closeModal('flowModal');
+          loadAiSettings(); // Reload to update UI
+        } else {
+          throw new Error('Falha ao salvar');
         }
-        
-        // Swipe navigation
-        gestureHandler.onSwipeLeft = () => {
-          const nextButton = document.querySelector('.nav-next')
-          if (nextButton) nextButton.click()
-        }
-        
-        gestureHandler.onSwipeRight = () => {
-          const prevButton = document.querySelector('.nav-prev')
-          if (prevButton) prevButton.click()
-        }
+      } catch (error) {
+        console.error('AI settings save error:', error);
+        toast('Erro ao salvar configurações', 'error');
       }
-
-      // Performance monitoring
-      if ('performance' in window) {
-        setTimeout(() => {
-          const stats = {
-            virtualScroller: window.VirtualMessageScroller?.getGlobalStats?.() || {},
-            lazyLoader: window.lazyLoader?.getStats?.() || {},
-            apiBatcher: window.apiBatcher?.getStats?.() || {}
+    }
+    
+    // Scheduling Functions
+    async function loadScheduledMessages() {
+      try {
+        const response = await fetch('/schedule/list');
+        if (response.ok) {
+          const scheduled = await response.json();
+          renderScheduledMessages(scheduled.messages || []);
+        }
+      } catch (error) {
+        console.error('Scheduled messages load error:', error);
+      }
+    }
+    
+    function renderScheduledMessages(messages) {
+      const container = document.getElementById('scheduledList');
+      if (!container) return;
+      
+      if (messages.length === 0) {
+        container.innerHTML = '<div class="empty-state">Nenhuma mensagem agendada</div>';
+        return;
+      }
+      
+      container.innerHTML = messages.map(msg => `
+        <div class="scheduled-item">
+          <div class="scheduled-info">
+            <h5>${escapeHtml(formatContactName(msg.to))}</h5>
+            <p>${escapeHtml(msg.message.substring(0, 50))}${msg.message.length > 50 ? '...' : ''}</p>
+            <div class="scheduled-datetime">${formatDateTime(msg.scheduledFor)}</div>
+          </div>
+          <div class="scheduled-actions">
+            <button class="btn outline" onclick="editScheduled('${msg.id}')">Editar</button>
+            <button class="btn outline" onclick="deleteScheduled('${msg.id}')">Excluir</button>
+          </div>
+        </div>
+      `).join('');
+    }
+    
+    async function scheduleMessage() {
+      const contact = document.getElementById('scheduleContact').value;
+      const message = document.getElementById('scheduleMessage').value.trim();
+      const date = document.getElementById('scheduleDate').value;
+      const time = document.getElementById('scheduleTime').value;
+      const repeat = document.getElementById('scheduleRepeat').checked;
+      
+      if (!contact || !message || !date || !time) {
+        toast('Preencha todos os campos', 'error');
+        return;
+      }
+      
+      const scheduledFor = new Date(`${date}T${time}`).toISOString();
+      
+      try {
+        const response = await fetch('/schedule/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: contact,
+            message,
+            scheduledFor,
+            repeat,
+            sessionId: state.sessionId
+          })
+        });
+        
+        if (response.ok) {
+          toast('Mensagem agendada com sucesso', 'success');
+          // Clear form
+          document.getElementById('scheduleForm').reset();
+          loadScheduledMessages();
+        } else {
+          throw new Error('Falha ao agendar');
+        }
+      } catch (error) {
+        console.error('Schedule error:', error);
+        toast('Erro ao agendar mensagem', 'error');
+      }
+    }
+    
+    async function deleteScheduled(id) {
+      if (confirm('Tem certeza que deseja excluir esta mensagem agendada?')) {
+        try {
+          const response = await fetch(`/schedule/${id}`, { method: 'DELETE' });
+          if (response.ok) {
+            toast('Mensagem agendada excluída', 'info');
+            loadScheduledMessages();
           }
+        } catch (error) {
+          console.error('Delete scheduled error:', error);
+          toast('Erro ao excluir', 'error');
+        }
+      }
+    }
+    
+    // Contacts Functions
+    async function loadContacts() {
+      try {
+        const response = await fetch('/me/contacts');
+        if (response.ok) {
+          const contacts = await response.json();
+          renderContacts(contacts.contacts || []);
+          populateContactSelect(contacts.contacts || []);
+        }
+      } catch (error) {
+        console.error('Contacts load error:', error);
+        document.getElementById('contactsList').innerHTML = 
+          '<div class="loading-state">Erro ao carregar contatos</div>';
+      }
+    }
+    
+    function renderContacts(contacts) {
+      const container = document.getElementById('contactsList');
+      if (!container) return;
+      
+      if (contacts.length === 0) {
+        container.innerHTML = '<div class="empty-state">Nenhum contato encontrado</div>';
+        return;
+      }
+      
+      container.innerHTML = contacts.map(contact => `
+        <div class="contact-item">
+          <div class="contact-info">
+            <div class="contact-avatar">${getInitials(formatContactName(contact.jid))}</div>
+            <div class="contact-details">
+              <h4>${escapeHtml(formatContactName(contact.jid))}</h4>
+              <p>${escapeHtml(contact.jid)}</p>
+            </div>
+          </div>
+          <div class="contact-actions">
+            <button class="btn outline" onclick="startChat('${contact.jid}')">Chat</button>
+            <button class="btn outline" onclick="deleteContact('${contact.jid}')">Excluir</button>
+          </div>
+        </div>
+      `).join('');
+    }
+    
+    function populateContactSelect(contacts) {
+      const select = document.getElementById('scheduleContact');
+      if (!select) return;
+      
+      select.innerHTML = '<option value="">Selecione um contato...</option>' +
+        contacts.map(contact => 
+          `<option value="${contact.jid}">${escapeHtml(formatContactName(contact.jid))}</option>`
+        ).join('');
+    }
+    
+    function searchContacts(e) {
+      const query = e.target.value.toLowerCase();
+      const items = document.querySelectorAll('.contact-item');
+      
+      items.forEach(item => {
+        const name = item.querySelector('h4').textContent.toLowerCase();
+        const phone = item.querySelector('p').textContent.toLowerCase();
+        const visible = name.includes(query) || phone.includes(query);
+        item.style.display = visible ? 'flex' : 'none';
+      });
+    }
+    
+    async function deleteContact(jid) {
+      if (confirm(`Tem certeza que deseja excluir ${formatContactName(jid)}?`)) {
+        try {
+          const response = await fetch(`/me/contacts/${encodeURIComponent(jid)}`, {
+            method: 'DELETE'
+          });
           
-          console.log('📊 Performance Stats:', stats)
-        }, 5000)
+          if (response.ok) {
+            toast('Contato excluído', 'info');
+            loadContacts();
+          }
+        } catch (error) {
+          console.error('Delete contact error:', error);
+          toast('Erro ao excluir contato', 'error');
+        }
       }
-
-      // 📞 SISTEMA DE CONTATOS - Inicialização
-      initContactSystem()
-    })
-
-  // === SISTEMA DE CONTATOS ===
-  function initContactSystem() {
-    // Event listeners para navegação
-    const contactsNavItem = document.querySelector('[data-nav="contacts"]')
-    contactsNavItem?.addEventListener('click', (e) => {
-      e.preventDefault()
-      openContactsModal()
-    })
-
-    // Event listeners dos modais
-    setupContactModalEvents()
-    setupContactFormEvents()
-  }
-
-  function setupContactModalEvents() {
-    const modal = document.getElementById('contacts-modal')
-    const closeBtn = modal.querySelector('[data-close-contacts]')
-    const searchInput = document.getElementById('contact-search')
-    const addBtn = document.getElementById('add-contact-btn')
-    const importBtn = document.getElementById('import-contacts-btn')
-    const exportBtn = document.getElementById('export-contacts-btn')
-
-    // Fechar modal
-    closeBtn?.addEventListener('click', () => closeModal('contacts-modal'))
-    modal?.addEventListener('click', (e) => {
-      if (e.target === modal) closeModal('contacts-modal')
-    })
-
-    // Busca de contatos
-    searchInput?.addEventListener('input', (e) => {
-      renderContactsList(e.target.value)
-    })
-
-    // Adicionar contato
-    addBtn?.addEventListener('click', () => openContactForm())
-
-    // Importar contatos
-    importBtn?.addEventListener('click', () => {
-      document.getElementById('import-file-input').click()
-    })
-
-    // Exportar contatos
-    exportBtn?.addEventListener('click', () => exportContacts())
-
-    // Input de arquivo
-    const fileInput = document.getElementById('import-file-input')
-    fileInput?.addEventListener('change', (e) => {
-      if (e.target.files[0]) {
-        importContacts(e.target.files[0])
-        e.target.value = '' // Reset input
+    }
+    
+    function startChat(jid) {
+      selectChat(jid);
+      closeModal('contactsModal');
+    }
+    
+    function addContact() {
+      const phone = prompt('Digite o número do telefone (com DDI):');
+      if (phone && validateInput(phone, 'phone')) {
+        const jid = phone.includes('@') ? phone : `${phone}@s.whatsapp.net`;
+        // Add to contacts logic would go here
+        toast('Funcionalidade de adicionar contato em desenvolvimento', 'info');
       }
-    })
-  }
-
-  function setupContactFormEvents() {
-    const modal = document.getElementById('contact-form-modal')
-    const form = document.getElementById('contact-form')
-    const closeBtn = modal.querySelector('[data-close-contact-form]')
-    const saveBtn = document.getElementById('save-contact-btn')
-
-    // Fechar modal
-    closeBtn?.addEventListener('click', () => closeModal('contact-form-modal'))
-    modal?.addEventListener('click', (e) => {
-      if (e.target === modal) closeModal('contact-form-modal')
-    })
-
-    // Salvar contato
-    saveBtn?.addEventListener('click', () => saveContact())
-    form?.addEventListener('submit', (e) => {
-      e.preventDefault()
-      saveContact()
-    })
-  }
-
-  function openContactsModal() {
-    document.getElementById('contacts-modal').setAttribute('aria-hidden', 'false')
-    renderContactsList()
-    updateContactStats()
-  }
-
-  function openContactForm(contact = null) {
-    const modal = document.getElementById('contact-form-modal')
-    const title = document.getElementById('contact-form-title')
-    const form = document.getElementById('contact-form')
-    
-    if (contact) {
-      title.textContent = 'Editar Contato'
-      document.getElementById('contact-name').value = contact.name
-      document.getElementById('contact-phone').value = contact.phone
-      document.getElementById('contact-tags').value = contact.tags.join(', ')
-      document.getElementById('contact-notes').value = contact.notes || ''
-      form.dataset.editPhone = contact.phone
-    } else {
-      title.textContent = 'Adicionar Contato'
-      form.reset()
-      delete form.dataset.editPhone
     }
     
-    modal.setAttribute('aria-hidden', 'false')
-    document.getElementById('contact-name').focus()
-  }
-
-  function closeModal(modalId) {
-    document.getElementById(modalId).setAttribute('aria-hidden', 'true')
-  }
-
-  function renderContactsList(searchQuery = '') {
-    const contacts = searchQuery 
-      ? contactManager.searchContacts(searchQuery)
-      : contactManager.getAllContacts()
-    
-    const container = document.getElementById('contacts-list')
-    const emptyState = document.getElementById('contacts-empty')
-    
-    if (contacts.length === 0) {
-      emptyState.style.display = 'block'
-      container.innerHTML = ''
-      container.appendChild(emptyState)
-      return
+    function exportContacts() {
+      toast('Export de contatos em desenvolvimento', 'info');
     }
     
-    emptyState.style.display = 'none'
-    
-    container.innerHTML = contacts.map(contact => `
-      <div class="contact-item" style="display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--wa-border); gap: 12px;">
-        <div class="contact-avatar" style="width: 40px; height: 40px; border-radius: 50%; background: var(--wa-accent); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;">
-          ${contact.name.charAt(0).toUpperCase()}
-        </div>
-        <div class="contact-info" style="flex: 1; min-width: 0;">
-          <div class="contact-name" style="font-weight: 600; margin-bottom: 2px;">${contact.name}</div>
-          <div class="contact-phone" style="font-size: 0.9rem; color: var(--muted); margin-bottom: 2px;">${formatPhoneForDisplay(contact.phone)}</div>
-          ${contact.tags.length ? `<div class="contact-tags" style="font-size: 0.8rem;">${contact.tags.map(tag => `<span style="background: var(--wa-accent); color: white; padding: 2px 6px; border-radius: 10px; margin-right: 4px;">${tag}</span>`).join('')}</div>` : ''}
-          ${contact.notes ? `<div class="contact-notes" style="font-size: 0.85rem; color: var(--muted); margin-top: 4px;">${contact.notes}</div>` : ''}
-        </div>
-        <div class="contact-actions" style="display: flex; gap: 8px;">
-          <button type="button" class="icon-btn" onclick="openContactForm(contactManager.getContact('${contact.phone}'))" title="Editar">✏️</button>
-          <button type="button" class="icon-btn" onclick="deleteContact('${contact.phone}')" title="Excluir" style="color: #e74c3c;">🗑️</button>
-        </div>
-      </div>
-    `).join('')
-  }
-
-  function updateContactStats() {
-    const stats = contactManager.getStats()
-    document.getElementById('stats-total').textContent = stats.total
-    document.getElementById('stats-notes').textContent = stats.withNotes
-    document.getElementById('stats-tags').textContent = stats.tags.length
-  }
-
-  function saveContact() {
-    const form = document.getElementById('contact-form')
-    const name = document.getElementById('contact-name').value.trim()
-    const phone = document.getElementById('contact-phone').value.trim()
-    const tags = document.getElementById('contact-tags').value.split(',').map(t => t.trim()).filter(Boolean)
-    const notes = document.getElementById('contact-notes').value.trim() || undefined
-    
-    if (!name || !phone) {
-      toast('Nome e telefone são obrigatórios', 'err')
-      return
+    // UI Controls
+    function toggleMenu() {
+      elements.hambMenu.classList.toggle('active');
     }
     
-    try {
-      contactManager.addContact(phone, name, tags, notes)
-      toast('Contato salvo com sucesso!', 'ok')
-      closeModal('contact-form-modal')
-      renderContactsList()
-      updateContactStats()
-    } catch (error) {
-      toast('Erro ao salvar contato: ' + error.message, 'err')
+    function toggleTheme() {
+      const html = document.documentElement;
+      const currentTheme = html.getAttribute('data-theme');
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      html.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      
+      // Update theme toggle icon
+      elements.themeToggle.textContent = newTheme === 'light' ? '🌙' : '☀️';
     }
-  }
-
-  function deleteContact(phone) {
-    if (confirm('Deseja realmente excluir este contato?')) {
-      if (contactManager.removeContact(phone)) {
-        toast('Contato excluído com sucesso!', 'ok')
-        renderContactsList()
-        updateContactStats()
+    
+    // New Chat Functions
+    function validatePhone(e) {
+      const phone = e.target.value.trim();
+      const feedback = document.getElementById('phoneValidation');
+      
+      if (!phone) {
+        feedback.style.display = 'none';
+        return;
+      }
+      
+      // Simple phone validation
+      const phoneRegex = /^\+?[1-9]\d{10,14}$/;
+      const isValid = phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+      
+      feedback.style.display = 'block';
+      if (isValid) {
+        feedback.textContent = '✓ Número válido';
+        feedback.className = 'validation-feedback success';
       } else {
-        toast('Erro ao excluir contato', 'err')
+        feedback.textContent = '⚠ Formato inválido. Use: +5511999999999';
+        feedback.className = 'validation-feedback error';
       }
     }
-  }
-
-  async function importContacts(file) {
-    try {
-      const result = await contactManager.importFromFile(file)
+    
+    async function createNewChat() {
+      const phoneInput = document.getElementById('phoneInput');
+      const phone = phoneInput.value.trim();
       
-      if (result.success > 0) {
-        toast(`${result.success} contatos importados com sucesso!`, 'ok')
-        renderContactsList()
-        updateContactStats()
+      if (!phone) {
+        toast('Digite um número de telefone', 'error');
+        return;
       }
       
-      if (result.errors.length > 0) {
-        console.warn('Erros na importação:', result.errors)
-        toast(`Importação concluída com ${result.errors.length} erros. Verifique o console.`, 'warn')
+      // Validate phone
+      const phoneRegex = /^\+?[1-9]\d{10,14}$/;
+      const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
+      
+      if (!phoneRegex.test(cleanPhone)) {
+        toast('Número de telefone inválido', 'error');
+        return;
       }
-    } catch (error) {
-      toast('Erro ao importar contatos: ' + error.message, 'err')
+      
+      // Format JID
+      let formattedPhone = cleanPhone;
+      if (!formattedPhone.startsWith('+')) {
+        formattedPhone = '+' + formattedPhone;
+      }
+      formattedPhone = formattedPhone.substring(1); // Remove + for JID
+      const jid = `${formattedPhone}@s.whatsapp.net`;
+      
+      // Create/select chat
+      if (!state.chats.has(jid)) {
+        state.chats.set(jid, {
+          id: jid,
+          name: formatContactName(jid),
+          messages: [],
+          lastMessage: null,
+          timestamp: Date.now()
+        });
+        renderChatList();
+      }
+      
+      selectChat(jid);
+      closeModal('newChatModal');
+      phoneInput.value = '';
+      document.getElementById('phoneValidation').style.display = 'none';
     }
-  }
-
-  function exportContacts() {
-    try {
-      const csv = contactManager.exportContacts()
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-      const link = document.createElement('a')
-      
-      if (link.download !== undefined) {
-        const url = URL.createObjectURL(blob)
-        link.setAttribute('href', url)
-        link.setAttribute('download', `contatos-zapsan-${new Date().toISOString().split('T')[0]}.csv`)
-        link.style.visibility = 'hidden'
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
+    
+    // Utility Functions
+    function formatDateTime(dateStr) {
+      try {
+        const date = new Date(dateStr);
+        return date.toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit', 
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      } catch {
+        return dateStr;
+      }
+    }
+    
+    function logout() {
+      if (confirm('Tem certeza que deseja fazer logout?')) {
+        localStorage.removeItem('auth');
+        localStorage.removeItem('session_id');
+        localStorage.removeItem('sessionId');
+        window.location.replace('/login.html');
+      }
+    }
+    
+    function openModal(modalId) {
+      const modal = document.getElementById(modalId);
+      if (modal) {
+        modal.classList.add('active');
+        // Close menu if open
+        elements.hambMenu.classList.remove('active');
         
-        toast('Contatos exportados com sucesso!', 'ok')
+        // Load specific modal data
+        if (modalId === 'flowModal') loadAiSettings();
+        if (modalId === 'scheduleModal') {
+          loadScheduledMessages();
+          loadContacts(); // For contact select
+        }
+        if (modalId === 'contactsModal') loadContacts();
+        if (modalId === 'qrModal') generateQRCode();
       }
-    } catch (error) {
-      toast('Erro ao exportar contatos: ' + error.message, 'err')
     }
-  }
-
-  function formatPhoneForDisplay(phone) {
-    // Formato: +55 (98) 99999-9999
-    if (phone.startsWith('55') && phone.length >= 12) {
-      const ddd = phone.substring(2, 4)
-      const number = phone.substring(4)
-      const part1 = number.substring(0, number.length - 4)
-      const part2 = number.substring(number.length - 4)
-      return `+55 (${ddd}) ${part1}-${part2}`
+    
+    function closeModal(modalId) {
+      const modal = document.getElementById(modalId);
+      if (modal) {
+        modal.classList.remove('active');
+      }
     }
-    return phone
-  }
+    
+    function goBack() {
+      if (window.innerWidth <= 768) {
+        elements.app.classList.remove('sidebar-open');
+        elements.backBtn.style.display = 'none';
+      }
+    }
+    
+    function handleFilter(e) {
+      // Remove active from all chips
+      document.querySelectorAll('.chip').forEach(chip => {
+        chip.classList.remove('active');
+      });
+      
+      // Add active to clicked chip
+      e.target.classList.add('active');
+      
+      const filter = e.target.dataset.filter;
+      filterChats(filter);
+    }
+    
+    function filterChats(filter) {
+      // Implementation for filtering chats
+      toast(`Filtro '${filter}' em desenvolvimento`, 'info');
+    }
+    
+    function handleBottomNav(e) {
+      e.preventDefault();
+      
+      // Remove active from all items
+      document.querySelectorAll('.bottom-nav-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      
+      // Add active to clicked item
+      e.currentTarget.classList.add('active');
+      
+      const nav = e.currentTarget.dataset.nav;
+      switch(nav) {
+        case 'chats':
+          // Already on chats
+          break;
+        case 'contacts':
+          toast('Contatos em desenvolvimento', 'info');
+          break;
+        case 'schedule':
+          toast('Agendamento em desenvolvimento', 'info');
+          break;
+        case 'ai':
+          toast('IA em desenvolvimento', 'info');
+          break;
+      }
+    }
+    
+    // Initialize theme
+    function initTheme() {
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      elements.themeToggle.textContent = savedTheme === 'light' ? '🌙' : '☀️';
+    }
 
-  // Integração com lista de chats - Mostrar nome dos contatos
-  function getDisplayName(jid) {
-    const phone = jid.split('@')[0] // Remove @s.whatsapp.net
-    return contactManager.getContactName(phone)
-  }
+    // Toast notifications
+    function toast(message, type = 'info') {
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.textContent = message;
+      toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 16px;
+        border-radius: 8px;
+        color: white;
+        z-index: 1000;
+        transition: all 0.3s ease;
+        transform: translateX(100%);
+      `;
+      
+      if (type === 'error') toast.style.background = '#f87171';
+      else if (type === 'success') toast.style.background = '#4ade80';
+      else toast.style.background = '#6b7280';
+      
+      document.body.appendChild(toast);
+      
+      setTimeout(() => toast.style.transform = 'translateX(0)', 100);
+      setTimeout(() => {
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    // Initialize app when ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>
